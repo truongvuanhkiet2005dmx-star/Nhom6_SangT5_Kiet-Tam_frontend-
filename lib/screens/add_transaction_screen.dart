@@ -41,6 +41,7 @@ class _AddTransactionScreenState
   String _note = '';
 
   List<Map<String, dynamic>> _wallets = [];
+  List<String> _userCustomCategories = [];
   int? _userId;
 
   bool _isLoading = true;
@@ -68,6 +69,7 @@ class _AddTransactionScreenState
   Future<void> _loadData() async {
     final prefs = await SharedPreferences.getInstance();
     final userId = prefs.getInt('userId');
+    final customCats = prefs.getStringList('custom_categories') ?? [];
 
     if (userId == null) {
       if (mounted) {
@@ -85,6 +87,7 @@ class _AddTransactionScreenState
     setState(() {
       _userId = userId;
       _wallets = wallets;
+      _userCustomCategories = customCats;
       _isLoading = false;
 
       if (_wallets.isNotEmpty) {
@@ -473,6 +476,8 @@ class _AddTransactionScreenState
           isExpenseVal = 0;
         }
 
+        final generatedEventId = DatabaseHelper.instance.generateUuid();
+
         insertedId = await txn.insert(
           'transactions',
           {
@@ -486,19 +491,11 @@ class _AddTransactionScreenState
             'date': _selectedDate.toIso8601String(),
             'note': _note,
             'isSynced': 0,
-            'eventId': 'tx_0',
+            'eventId': generatedEventId,
           },
-        );
-
-        await txn.update(
-          'transactions',
-          {'eventId': 'tx_$insertedId'},
-          where: 'id = ?',
-          whereArgs: [insertedId],
         );
       });
 
-      // F6 Fix: Lấy kết quả đồng bộ C# Backend thực tế
       bool isSyncedSuccess = false;
       try {
         final txData = {
@@ -506,6 +503,8 @@ class _AddTransactionScreenState
           'eventId': 'tx_$insertedId',
           'amount': amount,
           'type': _tabIndex == 0 ? 'expense' : (_tabIndex == 1 ? 'income' : 'transfer'),
+          'walletId': _selectedWalletId,
+          'toWalletId': _tabIndex == 2 ? _selectedToWalletId : null,
           'walletName': _selectedWallet,
           'bankName': _selectedWallet,
           'packageName': '',
@@ -552,7 +551,12 @@ class _AddTransactionScreenState
 
   @override
   Widget build(BuildContext context) {
-    // F2 Fix: Thêm 'Hóa đơn' vào danh sách categories chi tiêu trong grid
+    final standardExpenseNames = {'Đồ ăn', 'Đi lại', 'Mua sắm', 'Hóa đơn', 'Điện thoại', 'Giải trí', 'Giáo dục', 'Làm đẹp', 'Thể thao', 'Giao lưu', 'Quần áo', 'Khác'};
+    final customExpenseItems = _userCustomCategories
+        .where((cat) => !standardExpenseNames.contains(cat))
+        .map((cat) => {'name': cat, 'icon': Icons.category_outlined})
+        .toList();
+
     final expenseCategories = [
       {'name': 'Đồ ăn', 'icon': Icons.restaurant},
       {'name': 'Đi lại', 'icon': Icons.directions_bus},
@@ -565,6 +569,7 @@ class _AddTransactionScreenState
       {'name': 'Thể thao', 'icon': Icons.pool},
       {'name': 'Giao lưu', 'icon': Icons.people_outline},
       {'name': 'Quần áo', 'icon': Icons.checkroom},
+      ...customExpenseItems,
       {'name': 'Khác', 'icon': Icons.more_horiz},
     ];
 

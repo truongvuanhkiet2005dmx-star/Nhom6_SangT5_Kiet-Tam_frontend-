@@ -172,9 +172,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
       }
 
       final firebaseIdToken = await user.getIdToken();
-      if (firebaseIdToken != null && firebaseIdToken.isNotEmpty) {
-        await ApiService.instance.loginWithGoogle(idToken: firebaseIdToken);
+      if (firebaseIdToken == null || firebaseIdToken.isEmpty) {
+        throw Exception("Không thể lấy Firebase ID Token.");
       }
+      await ApiService.instance.loginWithGoogle(idToken: firebaseIdToken);
 
       final sqliteUser = await DatabaseHelper.instance.findOrCreateUserByFirebaseUid(
         firebaseUid: user.uid,

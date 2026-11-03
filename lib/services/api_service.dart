@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../core/constants.dart';
 
 class ApiException implements Exception {
@@ -19,7 +20,6 @@ class ApiService {
   static final ApiService instance = ApiService._init();
   final http.Client _client = http.Client();
 
-  // Stream notifying auth status when token expires (401)
   final ValueNotifier<bool> isAuthenticatedNotifier = ValueNotifier<bool>(false);
 
   ApiService._init();
@@ -35,7 +35,20 @@ class ApiService {
 
   Future<String?> getToken() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getString('accessToken');
+    final savedToken = prefs.getString('accessToken');
+    if (savedToken != null && savedToken.isNotEmpty) {
+      return savedToken;
+    }
+
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null) {
+        final token = await user.getIdToken();
+        if (token != null && token.isNotEmpty) return token;
+      }
+    } catch (_) {}
+
+    return null;
   }
 
   Future<void> saveToken(String token) async {
@@ -115,6 +128,34 @@ class ApiService {
     throw ApiException(errorMessage, statusCode: statusCode);
   }
 
+  // Health check
+  Future<Map<String, dynamic>> healthCheck() async {
+    final base = await baseUrl;
+    final uri = Uri.parse('$base/health');
+
+    try {
+      final response = await _client.get(uri).timeout(const Duration(seconds: 5));
+      final data = _processResponse(response);
+      return data is Map<String, dynamic> ? data : {};
+    } catch (e) {
+      return {'status': 'offline', 'error': e.toString()};
+    }
+  }
+
+  String normalizeWalletType(String type) {
+    final lower = type.toLowerCase().trim();
+    if (lower == 'cash' || lower == 'bank' || lower == 'ewallet') {
+      return lower;
+    }
+    if (lower.contains('momo') || lower.contains('zalopay') || lower.contains('zalo') || lower.contains('vnpay') || lower.contains('vi dien tu') || lower.contains('ví điện tử')) {
+      return 'ewallet';
+    }
+    if (lower.contains('tien mat') || lower.contains('mặt') || lower.contains('cash')) {
+      return 'cash';
+    }
+    return 'bank';
+  }
+
   // 1. Auth Endpoints
   Future<Map<String, dynamic>> register({
     required String email,
@@ -122,7 +163,7 @@ class ApiService {
     required String displayName,
   }) async {
     final base = await baseUrl;
-    final uri = Uri.parse('$base/auth/register');
+    final uri = Uri.parse('$base/api/auth/register');
 
     try {
       final response = await _client
@@ -155,7 +196,7 @@ class ApiService {
     required String password,
   }) async {
     final base = await baseUrl;
-    final uri = Uri.parse('$base/auth/login');
+    final uri = Uri.parse('$base/api/auth/login');
 
     try {
       final response = await _client
@@ -184,7 +225,7 @@ class ApiService {
 
   Future<Map<String, dynamic>> loginWithGoogle({required String idToken}) async {
     final base = await baseUrl;
-    final uri = Uri.parse('$base/auth/google');
+    final uri = Uri.parse('$base/api/auth/google');
 
     try {
       final response = await _client
@@ -212,7 +253,7 @@ class ApiService {
 
   Future<Map<String, dynamic>> getProfile() async {
     final base = await baseUrl;
-    final uri = Uri.parse('$base/auth/me');
+    final uri = Uri.parse('$base/api/auth/me');
 
     try {
       final response = await _client
@@ -239,7 +280,7 @@ class ApiService {
   Future<void> registerDeviceToken(String token) async {
     if (token.isEmpty) return;
     final base = await baseUrl;
-    final uri = Uri.parse('$base/devices/token');
+    final uri = Uri.parse('$base/api/devices/token');
 
     try {
       final response = await _client
@@ -259,7 +300,7 @@ class ApiService {
   Future<void> deleteDeviceToken(String token) async {
     if (token.isEmpty) return;
     final base = await baseUrl;
-    final uri = Uri.parse('$base/devices/token');
+    final uri = Uri.parse('$base/api/devices/token');
 
     try {
       final response = await _client
@@ -279,7 +320,7 @@ class ApiService {
   // 3. Family Group Endpoints
   Future<List<dynamic>> getFamilies() async {
     final base = await baseUrl;
-    final uri = Uri.parse('$base/families');
+    final uri = Uri.parse('$base/api/families');
 
     try {
       final response = await _client
@@ -306,7 +347,7 @@ class ApiService {
     required String displayName,
   }) async {
     final base = await baseUrl;
-    final uri = Uri.parse('$base/families');
+    final uri = Uri.parse('$base/api/families');
 
     try {
       final response = await _client
@@ -334,7 +375,7 @@ class ApiService {
     required String relationship,
   }) async {
     final base = await baseUrl;
-    final uri = Uri.parse('$base/families/join');
+    final uri = Uri.parse('$base/api/families/join');
 
     try {
       final response = await _client
@@ -357,10 +398,48 @@ class ApiService {
     }
   }
 
+  Future<void> leaveFamily(int familyGroupId) async {
+    final base = await baseUrl;
+    final uri = Uri.parse('$base/api/families/$familyGroupId/leave');
+
+    try {
+      final response = await _client
+          .post(
+            uri,
+            headers: await _headers(withAuth: true),
+          )
+          .timeout(const Duration(seconds: 10));
+
+      _processResponse(response);
+    } catch (e) {
+      if (e is ApiException) rethrow;
+      throw ApiException('Lỗi rời nhóm gia đình: $e');
+    }
+  }
+
+  Future<void> deleteFamily(int familyGroupId) async {
+    final base = await baseUrl;
+    final uri = Uri.parse('$base/api/families/$familyGroupId');
+
+    try {
+      final response = await _client
+          .delete(
+            uri,
+            headers: await _headers(withAuth: true),
+          )
+          .timeout(const Duration(seconds: 10));
+
+      _processResponse(response);
+    } catch (e) {
+      if (e is ApiException) rethrow;
+      throw ApiException('Lỗi xóa nhóm gia đình: $e');
+    }
+  }
+
   // 4. Wallet Endpoints
   Future<List<dynamic>> getWallets() async {
     final base = await baseUrl;
-    final uri = Uri.parse('$base/wallets');
+    final uri = Uri.parse('$base/api/wallets');
 
     try {
       final response = await _client
@@ -384,7 +463,7 @@ class ApiService {
 
   Future<Map<String, dynamic>> getWallet(int id) async {
     final base = await baseUrl;
-    final uri = Uri.parse('$base/wallets/$id');
+    final uri = Uri.parse('$base/api/wallets/$id');
 
     try {
       final response = await _client
@@ -402,20 +481,6 @@ class ApiService {
     }
   }
 
-  String normalizeWalletType(String type) {
-    final lower = type.toLowerCase().trim();
-    if (lower == 'cash' || lower == 'bank' || lower == 'ewallet') {
-      return lower;
-    }
-    if (lower.contains('momo') || lower.contains('zalo') || lower.contains('vi')) {
-      return 'ewallet';
-    }
-    if (lower.contains('tien mat') || lower.contains('mặt')) {
-      return 'cash';
-    }
-    return 'bank';
-  }
-
   Future<Map<String, dynamic>> createWallet({
     required String name,
     required int balance,
@@ -423,7 +488,7 @@ class ApiService {
     String? accountNumber,
   }) async {
     final base = await baseUrl;
-    final uri = Uri.parse('$base/wallets');
+    final uri = Uri.parse('$base/api/wallets');
 
     final validParams = {
       'name': name,
@@ -457,7 +522,7 @@ class ApiService {
     String? accountNumber,
   }) async {
     final base = await baseUrl;
-    final uri = Uri.parse('$base/wallets/$id');
+    final uri = Uri.parse('$base/api/wallets/$id');
 
     final validParams = {
       'name': name,
@@ -485,7 +550,7 @@ class ApiService {
 
   Future<void> deleteWallet(int id) async {
     final base = await baseUrl;
-    final uri = Uri.parse('$base/wallets/$id');
+    final uri = Uri.parse('$base/api/wallets/$id');
 
     try {
       final response = await _client
@@ -502,14 +567,14 @@ class ApiService {
     }
   }
 
-  // 5. Transaction Endpoints
+  // 5. Transaction Endpoints (`GET /api/transactions`, `POST /api/transactions`)
   Future<List<dynamic>> getTransactions({int? year, int? month}) async {
     final base = await baseUrl;
     final queryParams = <String, String>{};
     if (year != null) queryParams['year'] = year.toString();
     if (month != null) queryParams['month'] = month.toString();
 
-    final uri = Uri.parse('$base/transactions').replace(queryParameters: queryParams.isEmpty ? null : queryParams);
+    final uri = Uri.parse('$base/api/transactions').replace(queryParameters: queryParams.isEmpty ? null : queryParams);
 
     try {
       final response = await _client
@@ -527,20 +592,42 @@ class ApiService {
       return [];
     } catch (e) {
       if (e is ApiException) rethrow;
-      throw ApiException('Lỗi lấy danh sách giao dịch: $e');
+      throw ApiException('Lỗi lấy danh sách giao dịch từ C# backend: $e');
     }
   }
 
   Future<Map<String, dynamic>> createTransaction(Map<String, dynamic> payload) async {
     final base = await baseUrl;
-    final uri = Uri.parse('$base/transactions');
+    final uri = Uri.parse('$base/api/transactions');
+
+    final dtoPayload = <String, dynamic>{
+      'eventId': payload['eventId']?.toString() ?? '',
+      'amount': (payload['amount'] as num?)?.toInt().abs() ?? 0,
+      'type': payload['type']?.toString() ?? 'expense',
+      'source': payload['source']?.toString() ?? payload['walletName']?.toString() ?? 'Ví tài khoản',
+      'bankName': payload['bankName']?.toString() ?? '',
+      'packageName': payload['packageName']?.toString() ?? '',
+      'occurredAt': payload['occurredAt'] ?? payload['occurredAtUtc'] ?? DateTime.now().toUtc().toIso8601String(),
+      'categoryName': payload['categoryName']?.toString() ?? 'Khác',
+      'note': payload['note']?.toString() ?? '',
+    };
+
+    if (payload.containsKey('walletId') && payload['walletId'] != null) {
+      dtoPayload['walletId'] = payload['walletId'];
+    }
+    if (payload.containsKey('toWalletId') && payload['toWalletId'] != null) {
+      dtoPayload['toWalletId'] = payload['toWalletId'];
+    }
+    if (payload.containsKey('familyGroupId') && payload['familyGroupId'] != null) {
+      dtoPayload['familyGroupId'] = payload['familyGroupId'];
+    }
 
     try {
       final response = await _client
           .post(
             uri,
             headers: await _headers(withAuth: true),
-            body: jsonEncode(payload),
+            body: jsonEncode(dtoPayload),
           )
           .timeout(const Duration(seconds: 10));
 
@@ -548,13 +635,13 @@ class ApiService {
       return data is Map<String, dynamic> ? data : {};
     } catch (e) {
       if (e is ApiException) rethrow;
-      throw ApiException('Lỗi tạo giao dịch: $e');
+      throw ApiException('Lỗi lưu giao dịch lên C# backend: $e');
     }
   }
 
   Future<Map<String, dynamic>> updateTransaction(int id, Map<String, dynamic> payload) async {
     final base = await baseUrl;
-    final uri = Uri.parse('$base/transactions/$id');
+    final uri = Uri.parse('$base/api/transactions/$id');
 
     try {
       final response = await _client
@@ -575,7 +662,7 @@ class ApiService {
 
   Future<void> deleteTransaction(int id) async {
     final base = await baseUrl;
-    final uri = Uri.parse('$base/transactions/$id');
+    final uri = Uri.parse('$base/api/transactions/$id');
 
     try {
       final response = await _client
@@ -607,7 +694,7 @@ class ApiService {
       queryParams['familyGroupId'] = familyGroupId.toString();
     }
 
-    final uri = Uri.parse('$base/reports/monthly').replace(queryParameters: queryParams);
+    final uri = Uri.parse('$base/api/reports/monthly').replace(queryParameters: queryParams);
 
     try {
       final response = await _client
@@ -627,7 +714,7 @@ class ApiService {
 
   Future<Map<String, dynamic>> getBudget(int familyGroupId, {required int year, required int month}) async {
     final base = await baseUrl;
-    final uri = Uri.parse('$base/budgets/$familyGroupId').replace(queryParameters: {
+    final uri = Uri.parse('$base/api/budgets/$familyGroupId').replace(queryParameters: {
       'year': year.toString(),
       'month': month.toString(),
     });
@@ -655,7 +742,7 @@ class ApiService {
     required int monthlyLimit,
   }) async {
     final base = await baseUrl;
-    final uri = Uri.parse('$base/budgets/$familyGroupId');
+    final uri = Uri.parse('$base/api/budgets/$familyGroupId');
 
     try {
       final response = await _client

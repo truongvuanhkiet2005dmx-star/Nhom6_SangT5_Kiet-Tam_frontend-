@@ -711,6 +711,64 @@ class _FamilyWalletModalState extends State<_FamilyWalletModal> {
     }
   }
 
+  Future<void> _leaveFamily(int familyId) async {
+    setState(() => _isSubmitting = true);
+    try {
+      await ApiService.instance.leaveFamily(familyId);
+      final prefs = await SharedPreferences.getInstance();
+      if (_activeFamilyGroupId == familyId) {
+        await prefs.remove('activeFamilyGroupId');
+        _activeFamilyGroupId = null;
+      }
+      if (!mounted) return;
+      await _loadFamilyData();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Đã rời nhóm gia đình!'), backgroundColor: Colors.green),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Không thể rời nhóm: $e'), backgroundColor: Colors.red),
+      );
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
+    }
+  }
+
+  Future<void> _deleteFamily(int familyId) async {
+    setState(() => _isSubmitting = true);
+    try {
+      await ApiService.instance.deleteFamily(familyId);
+      final prefs = await SharedPreferences.getInstance();
+      if (_activeFamilyGroupId == familyId) {
+        await prefs.remove('activeFamilyGroupId');
+        _activeFamilyGroupId = null;
+      }
+      if (!mounted) return;
+      await _loadFamilyData();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Đã xóa nhóm gia đình!'), backgroundColor: Colors.green),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Lỗi xóa nhóm: $e'), backgroundColor: Colors.red),
+      );
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
+    }
+  }
+
+  Future<void> _switchToPersonalMode() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('activeFamilyGroupId');
+    if (!mounted) return;
+    setState(() => _activeFamilyGroupId = null);
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Đã chuyển về Chế độ Quản lý Cá nhân!'), backgroundColor: Colors.green),
+    );
+  }
+
   Future<void> _saveBudget() async {
     if (_activeFamilyGroupId == null || _activeFamilyGroupId! <= 0) return;
     final budgetVal = int.tryParse(_budgetController.text.replaceAll(',', '').replaceAll('.', '').trim()) ?? 0;
@@ -782,6 +840,7 @@ class _FamilyWalletModalState extends State<_FamilyWalletModal> {
                     final fId = (f['id'] ?? f['familyGroupId']) as int?;
                     final fName = f['name']?.toString() ?? 'Nhóm gia đình';
                     final isSelected = fId == _activeFamilyGroupId;
+                    final isOwner = f['isOwner'] == true || f['role']?.toString().toLowerCase() == 'owner';
 
                     return Card(
                       color: isSelected ? AppColors.surface : AppColors.card,
@@ -792,23 +851,54 @@ class _FamilyWalletModalState extends State<_FamilyWalletModal> {
                       child: ListTile(
                         title: Text(fName, style: const TextStyle(color: AppColors.textDark, fontWeight: FontWeight.bold)),
                         subtitle: Text(f['inviteCode'] != null ? 'Mã mời: ${f['inviteCode']}' : '', style: const TextStyle(color: AppColors.textSub, fontSize: 11)),
-                        trailing: isSelected
-                            ? const Icon(Icons.check_circle, color: AppColors.primary)
-                            : ElevatedButton(
-                          style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
-                          onPressed: () async {
-                            final prefs = await SharedPreferences.getInstance();
-                            if (fId != null) {
-                              await prefs.setInt('activeFamilyGroupId', fId);
-                              setState(() => _activeFamilyGroupId = fId);
-                            }
-                          },
-                          child: const Text('Chọn', style: TextStyle(color: Colors.black, fontSize: 12)),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (fId != null) ...[
+                              IconButton(
+                                icon: const Icon(Icons.exit_to_app, color: Colors.orangeAccent, size: 20),
+                                tooltip: 'Rời nhóm',
+                                onPressed: _isSubmitting ? null : () => _leaveFamily(fId),
+                              ),
+                              if (isOwner)
+                                IconButton(
+                                  icon: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 20),
+                                  tooltip: 'Xóa nhóm',
+                                  onPressed: _isSubmitting ? null : () => _deleteFamily(fId),
+                                ),
+                            ],
+                            const SizedBox(width: 4),
+                            isSelected
+                                ? const Icon(Icons.check_circle, color: AppColors.primary)
+                                : ElevatedButton(
+                              style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
+                              onPressed: () async {
+                                final prefs = await SharedPreferences.getInstance();
+                                if (fId != null) {
+                                  await prefs.setInt('activeFamilyGroupId', fId);
+                                  setState(() => _activeFamilyGroupId = fId);
+                                }
+                              },
+                              child: const Text('Chọn', style: TextStyle(color: Colors.black, fontSize: 12)),
+                            ),
+                          ],
                         ),
                       ),
                     );
                   }).toList(),
                 ),
+                if (_activeFamilyGroupId != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton.icon(
+                        onPressed: _switchToPersonalMode,
+                        icon: const Icon(Icons.person, size: 16, color: AppColors.primary),
+                        label: const Text('Bỏ chọn nhóm (Về chế độ Cá nhân)', style: TextStyle(color: AppColors.primary, fontSize: 12)),
+                      ),
+                    ),
+                  ),
                 const SizedBox(height: 16),
               ],
 

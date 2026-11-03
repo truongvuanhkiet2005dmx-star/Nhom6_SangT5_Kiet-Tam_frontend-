@@ -31,7 +31,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 7,
+      version: 8,
       onCreate: _createDB,
       onUpgrade: _onUpgrade,
     );
@@ -128,6 +128,10 @@ class DatabaseHelper {
         FOREIGN KEY (walletId) REFERENCES wallets(id),
         FOREIGN KEY (toWalletId) REFERENCES wallets(id)
       )
+    ''');
+
+    await db.execute('''
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_transactions_eventId ON transactions(eventId) WHERE eventId IS NOT NULL;
     ''');
 
     await db.execute('''
@@ -279,6 +283,31 @@ class DatabaseHelper {
           ADD COLUMN serverId INTEGER
         ''');
       } catch (_) {}
+    }
+
+    if (oldVersion < 8) {
+      try {
+        final rowsWithoutEventId = await db.query(
+          'transactions',
+          where: "eventId IS NULL OR eventId = '' OR eventId = 'tx_0' OR eventId LIKE 'tx_%'",
+        );
+        for (final row in rowsWithoutEventId) {
+          final id = row['id'] as int;
+          final newUuid = generateUuid();
+          await db.update(
+            'transactions',
+            {'eventId': newUuid},
+            where: 'id = ?',
+            whereArgs: [id],
+          );
+        }
+
+        await db.execute('''
+          CREATE UNIQUE INDEX IF NOT EXISTS idx_transactions_eventId ON transactions(eventId) WHERE eventId IS NOT NULL
+        ''');
+      } catch (e) {
+        debugPrint("[DatabaseHelper] Migration v8 warning: $e");
+      }
     }
   }
 
@@ -810,7 +839,7 @@ class DatabaseHelper {
     final db = await instance.database;
     final serverId = (remoteWallet['id'] ?? remoteWallet['walletId']) as int?;
     final name = remoteWallet['name']?.toString() ?? 'Ví';
-    final balance = (remoteWallet['initialBalance'] ?? remoteWallet['balance'] as num?)?.toInt() ?? 0;
+    final balance = (remoteWallet['currentBalance'] ?? remoteWallet['balance'] ?? remoteWallet['initialBalance'] as num?)?.toInt() ?? 0;
     final type = remoteWallet['type']?.toString() ?? 'bank';
 
     if (serverId != null && serverId > 0) {

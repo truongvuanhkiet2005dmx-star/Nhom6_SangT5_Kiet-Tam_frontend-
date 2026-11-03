@@ -174,8 +174,8 @@ class AutoTransactionService {
 
           if (cleanWalletAcc.isNotEmpty) {
             if (cleanExtracted == cleanWalletAcc ||
-                (cleanExtracted.length >= 4 && cleanWalletAcc.endsWith(cleanExtracted)) ||
-                (cleanWalletAcc.length >= 4 && cleanExtracted.endsWith(cleanWalletAcc))) {
+                (cleanExtracted.length >= 6 && cleanWalletAcc.endsWith(cleanExtracted)) ||
+                (cleanWalletAcc.length >= 6 && cleanExtracted.endsWith(cleanWalletAcc))) {
               return wallet;
             }
           }
@@ -223,12 +223,11 @@ class AutoTransactionService {
 
     bool isBankMessage = lowerContent.contains('vnd') ||
         lowerContent.contains('vnđ') ||
-        lowerContent.contains('đ') ||
         lowerContent.contains('đồng') ||
         lowerContent.contains('so du') ||
         lowerContent.contains('sodu') ||
         lowerContent.contains('tai khoan') ||
-        RegExp(r'\b(?:tk|gd|ps|sd|stk)\b', caseSensitive: false).hasMatch(content);
+        RegExp(r'\b(?:tk|gd|ps|stk)\b', caseSensitive: false).hasMatch(content);
 
     if (!isBankMessage) {
       return false;
@@ -380,6 +379,8 @@ class AutoTransactionService {
       displayNote = ndMatch.group(1)?.trim() ?? rawContent;
     }
 
+    final generatedEventId = DatabaseHelper.instance.generateUuid();
+
     int insertedTxId = 0;
     int newBalance = 0;
     await db.transaction((txn) async {
@@ -409,15 +410,8 @@ class AutoTransactionService {
           'date': DateTime.now().toIso8601String(),
           'note': 'Auto: $displayNote',
           'isSynced': 0,
-          'eventId': 'tx_0',
+          'eventId': generatedEventId,
         },
-      );
-
-      await txn.update(
-        'transactions',
-        {'eventId': 'tx_$insertedTxId'},
-        where: 'id = ?',
-        whereArgs: [insertedTxId],
       );
     });
 
@@ -437,9 +431,10 @@ class AutoTransactionService {
     try {
       final txData = {
         'id': insertedTxId,
-        'eventId': 'tx_$insertedTxId',
+        'eventId': generatedEventId,
         'amount': amount,
         'type': isExpense ? 'expense' : 'income',
+        'walletId': walletId,
         'walletName': walletName,
         'bankName': walletName,
         'packageName': packageName,

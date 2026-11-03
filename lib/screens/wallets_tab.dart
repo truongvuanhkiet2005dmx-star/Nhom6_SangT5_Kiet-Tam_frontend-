@@ -609,16 +609,33 @@ class _EditWalletDialogState extends State<_EditWalletDialog> {
 
             final diff = newBalance - oldBalance;
             if (diff != 0 && userId != null) {
-              await DatabaseHelper.instance.insertTransaction({
+              final adjEventId = DatabaseHelper.instance.generateUuid();
+              final adjTxId = await DatabaseHelper.instance.insertTransaction({
                 'userId': userId,
                 'walletId': walletId,
                 'amount': diff.abs(),
-                'type': diff < 0 ? 'expense' : 'income',
+                'type': 'adjustment',
                 'isExpense': diff < 0 ? 1 : 0,
                 'categoryName': 'Điều chỉnh số dư',
                 'date': DateTime.now().toIso8601String(),
                 'note': 'Chỉnh sửa số dư ví trực tiếp',
+                'isSynced': 0,
+                'eventId': adjEventId,
               });
+
+              unawaited(SyncService.instance.syncTransaction({
+                'id': adjTxId,
+                'userId': userId,
+                'eventId': adjEventId,
+                'amount': diff.abs(),
+                'type': 'adjustment',
+                'walletId': walletId,
+                'walletName': name,
+                'bankName': name,
+                'categoryName': 'Điều chỉnh số dư',
+                'date': DateTime.now().toIso8601String(),
+                'note': 'Chỉnh sửa số dư ví trực tiếp',
+              }));
             }
 
             if (!mounted) return;

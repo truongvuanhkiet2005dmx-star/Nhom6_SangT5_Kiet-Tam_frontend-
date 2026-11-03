@@ -90,7 +90,11 @@ class _ReportsTabState extends State<ReportsTab> {
           if (categoryList is List) {
             for (var item in categoryList) {
               if (item is Map) {
+                final itemType = item['type']?.toString().toLowerCase();
                 final catName = item['categoryName']?.toString() ?? item['category']?.toString() ?? 'Khác';
+                if (itemType == 'transfer' || catName.toLowerCase().contains('chuyển khoản') || catName.toLowerCase().contains('transfer')) {
+                  continue;
+                }
                 final catAmt = ((item['amount'] ?? item['total']) as num?)?.toInt() ?? 0;
                 categories[catName] = catAmt;
               }
@@ -115,8 +119,9 @@ class _ReportsTabState extends State<ReportsTab> {
         final transactions = await DatabaseHelper.instance.getAllTransactions(userId);
 
         for (final tx in transactions) {
-          final type = tx['type']?.toString();
-          if (type == 'transfer') continue;
+          final type = tx['type']?.toString().toLowerCase();
+          final cat = tx['categoryName']?.toString();
+          if (type == 'transfer' || type == 'adjustment' || type == 'adjustment_increase' || type == 'adjustment_decrease' || cat == 'Điều chỉnh số dư') continue;
 
           final isExpense = tx['isExpense'] == 1;
           if (_modeIndex == 0 && !isExpense) continue;

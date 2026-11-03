@@ -86,19 +86,33 @@ class SyncService {
 
       int? serverWalletId;
       final localWalletId = tx['walletId'] as int?;
+      final localUserId = tx['userId'] as int?;
+
       if (localWalletId != null && localWalletId > 0) {
-        final walletData = await DatabaseHelper.instance.getWalletById(localWalletId);
+        var walletData = await DatabaseHelper.instance.getWalletById(localWalletId);
         if (walletData != null && walletData['serverId'] != null) {
           serverWalletId = walletData['serverId'] as int;
+        } else if (localUserId != null) {
+          await syncUnsyncedWallets(localUserId);
+          walletData = await DatabaseHelper.instance.getWalletById(localWalletId);
+          if (walletData != null && walletData['serverId'] != null) {
+            serverWalletId = walletData['serverId'] as int;
+          }
         }
       }
 
       int? serverToWalletId;
       final localToWalletId = tx['toWalletId'] as int?;
       if (localToWalletId != null && localToWalletId > 0) {
-        final toWalletData = await DatabaseHelper.instance.getWalletById(localToWalletId);
+        var toWalletData = await DatabaseHelper.instance.getWalletById(localToWalletId);
         if (toWalletData != null && toWalletData['serverId'] != null) {
           serverToWalletId = toWalletData['serverId'] as int;
+        } else if (localUserId != null) {
+          await syncUnsyncedWallets(localUserId);
+          toWalletData = await DatabaseHelper.instance.getWalletById(localToWalletId);
+          if (toWalletData != null && toWalletData['serverId'] != null) {
+            serverToWalletId = toWalletData['serverId'] as int;
+          }
         }
       }
 
@@ -111,6 +125,7 @@ class SyncService {
         'bankName': bankName,
         'packageName': packageName,
         'occurredAtUtc': occurredAtUtc,
+        'occurredAt': occurredAtUtc,
         'note': note,
       };
 
@@ -126,7 +141,7 @@ class SyncService {
         payload['familyGroupId'] = familyGroupId;
       }
 
-      debugPrint("[SyncService] Gửi POST /transactions (type: $type) với eventId: $eventId...");
+      debugPrint("[SyncService] Gửi POST API (type: $type) với eventId: $eventId...");
 
       final res = await ApiService.instance.createTransaction(payload);
 
@@ -184,8 +199,7 @@ class SyncService {
 
       // 4. Tải các giao dịch từ Backend về local SQLite (upsert)
       try {
-        final now = DateTime.now();
-        final remoteTxs = await ApiService.instance.getTransactions(year: now.year, month: now.month);
+        final remoteTxs = await ApiService.instance.getTransactions();
         for (var rtx in remoteTxs) {
           if (rtx is Map<String, dynamic>) {
             await DatabaseHelper.instance.upsertTransactionFromBackend(userId, rtx);
