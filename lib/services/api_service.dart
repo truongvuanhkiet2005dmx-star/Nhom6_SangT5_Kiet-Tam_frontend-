@@ -427,9 +427,9 @@ class ApiService {
 
     final validParams = {
       'name': name,
+      'initialBalance': balance,
       'balance': balance,
       'type': normalizeWalletType(type),
-      if (accountNumber != null && accountNumber.isNotEmpty) 'accountNumber': accountNumber,
     };
 
     try {
@@ -461,9 +461,9 @@ class ApiService {
 
     final validParams = {
       'name': name,
+      'initialBalance': balance,
       'balance': balance,
       'type': normalizeWalletType(type),
-      if (accountNumber != null && accountNumber.isNotEmpty) 'accountNumber': accountNumber,
     };
 
     try {

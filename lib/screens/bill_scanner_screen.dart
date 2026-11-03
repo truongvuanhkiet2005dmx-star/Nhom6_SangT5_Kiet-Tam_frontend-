@@ -80,9 +80,12 @@ class _BillScannerScreenState
       final textRecognizer = TextRecognizer(
         script: TextRecognitionScript.latin,
       );
-      final RecognizedText recognizedText = await textRecognizer.processImage(inputImage);
-      extractedText = recognizedText.text;
-      await textRecognizer.close();
+      try {
+        final RecognizedText recognizedText = await textRecognizer.processImage(inputImage);
+        extractedText = recognizedText.text;
+      } finally {
+        await textRecognizer.close();
+      }
 
       final extractedAmount = _extractMoneyFromText(extractedText);
 

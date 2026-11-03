@@ -7,6 +7,10 @@ class SyncService {
   static final SyncService instance = SyncService._init();
   SyncService._init();
 
+  bool _isSyncing = false;
+
+  bool get isSyncing => _isSyncing;
+
   Future<void> syncUnsyncedWallets(int userId) async {
     try {
       final token = await ApiService.instance.getToken();
@@ -47,9 +51,9 @@ class SyncService {
 
   Future<bool> syncTransaction(Map<String, dynamic> tx) async {
     final txId = tx['id'] as int?;
-    final eventId = tx['eventId']?.toString().isNotEmpty == true
+    final eventId = (tx['eventId']?.toString().isNotEmpty == true && tx['eventId'].toString() != 'tx_0')
         ? tx['eventId'].toString()
-        : (txId != null ? 'tx_$txId' : 'tx_${DateTime.now().millisecondsSinceEpoch}');
+        : DatabaseHelper.instance.generateUuid();
 
     try {
       final token = await ApiService.instance.getToken();
@@ -61,12 +65,7 @@ class SyncService {
       final prefs = await SharedPreferences.getInstance();
       final familyGroupId = prefs.getInt('activeFamilyGroupId');
 
-      String type = (tx['type']?.toString().isNotEmpty == true)
-          ? tx['type'].toString()
-          : (tx['isExpense'] == 1 ? 'expense' : 'income');
-      if (type != 'income' && type != 'expense') {
-        type = 'expense';
-      }
+      String type = tx['type']?.toString() ?? (tx['isExpense'] == 1 ? 'expense' : 'income');
 
       final String source = tx['walletName']?.toString() ?? 'Ví tài khoản';
       final String bankName = tx['bankName']?.toString() ?? source;
@@ -94,6 +93,15 @@ class SyncService {
         }
       }
 
+      int? serverToWalletId;
+      final localToWalletId = tx['toWalletId'] as int?;
+      if (localToWalletId != null && localToWalletId > 0) {
+        final toWalletData = await DatabaseHelper.instance.getWalletById(localToWalletId);
+        if (toWalletData != null && toWalletData['serverId'] != null) {
+          serverToWalletId = toWalletData['serverId'] as int;
+        }
+      }
+
       final payload = <String, dynamic>{
         'eventId': eventId,
         'amount': amount,
@@ -110,11 +118,15 @@ class SyncService {
         payload['walletId'] = serverWalletId;
       }
 
+      if (serverToWalletId != null && serverToWalletId > 0) {
+        payload['toWalletId'] = serverToWalletId;
+      }
+
       if (familyGroupId != null && familyGroupId > 0) {
         payload['familyGroupId'] = familyGroupId;
       }
 
-      debugPrint("[SyncService] Gửi POST /transactions với eventId: $eventId...");
+      debugPrint("[SyncService] Gửi POST /transactions (type: $type) với eventId: $eventId...");
 
       final res = await ApiService.instance.createTransaction(payload);
 
@@ -130,24 +142,66 @@ class SyncService {
       debugPrint("[SyncService] Đồng bộ giao dịch $eventId thành công.");
       return true;
     } catch (e) {
-      debugPrint("[SyncService] Lỗi khi gửi API đồng bộ giao dịch ($eventId): $e");
+      debugPrint("[SyncService] Không thể đồng bộ giao dịch ($eventId) với backend: $e. Giữ local isSynced = 0.");
       return false;
     }
   }
 
-  Future<void> syncAllPendingTransactions(int userId) async {
+  Future<void> pullAndSyncFromBackend(int userId) async {
+    if (_isSyncing) {
+      debugPrint("[SyncService] Tiến trình đồng bộ đang chạy. Bỏ qua yêu cầu đồng bộ lặp.");
+      return;
+    }
+
+    _isSyncing = true;
     try {
+      final token = await ApiService.instance.getToken();
+      if (token == null || token.isEmpty) return;
+
+      // 1. Đồng bộ ví local chưa có serverId
       await syncUnsyncedWallets(userId);
 
-      final unsynced = await DatabaseHelper.instance.getUnsyncedTransactions(userId);
-      if (unsynced.isEmpty) return;
+      // 2. Tải ví từ Backend về local SQLite (upsert)
+      try {
+        final remoteWallets = await ApiService.instance.getWallets();
+        for (var rw in remoteWallets) {
+          if (rw is Map<String, dynamic>) {
+            await DatabaseHelper.instance.upsertWalletFromBackend(userId, rw);
+          }
+        }
+      } catch (e) {
+        debugPrint("[SyncService] Lỗi kéo danh sách ví từ backend: $e");
+      }
 
-      debugPrint("[SyncService] Phát hiện ${unsynced.length} giao dịch chờ đồng bộ cho userId $userId.");
-      for (var tx in unsynced) {
-        await syncTransaction(tx);
+      // 3. Gửi các giao dịch local chờ đồng bộ
+      final unsynced = await DatabaseHelper.instance.getUnsyncedTransactions(userId);
+      if (unsynced.isNotEmpty) {
+        debugPrint("[SyncService] Phát hiện ${unsynced.length} giao dịch chờ đồng bộ.");
+        for (var tx in unsynced) {
+          await syncTransaction(tx);
+        }
+      }
+
+      // 4. Tải các giao dịch từ Backend về local SQLite (upsert)
+      try {
+        final now = DateTime.now();
+        final remoteTxs = await ApiService.instance.getTransactions(year: now.year, month: now.month);
+        for (var rtx in remoteTxs) {
+          if (rtx is Map<String, dynamic>) {
+            await DatabaseHelper.instance.upsertTransactionFromBackend(userId, rtx);
+          }
+        }
+      } catch (e) {
+        debugPrint("[SyncService] Lỗi kéo giao dịch từ backend: $e");
       }
     } catch (e) {
-      debugPrint("[SyncService] Lỗi khi duyệt danh sách đồng bộ chờ: $e");
+      debugPrint("[SyncService] Lỗi tổng quát khi đồng bộ hai chiều: $e");
+    } finally {
+      _isSyncing = false;
     }
+  }
+
+  Future<void> syncAllPendingTransactions(int userId) async {
+    await pullAndSyncFromBackend(userId);
   }
 }

@@ -39,7 +39,7 @@ class _LoginScreenState extends State<LoginScreen> {
         await ApiService.instance.registerDeviceToken(token);
       }
     } catch (e) {
-      debugPrint("[LoginScreen] Could not register FCM token: $e");
+      debugPrint("[LoginScreen] FCM token registration warning: $e");
     }
   }
 
@@ -48,16 +48,11 @@ class _LoginScreenState extends State<LoginScreen> {
     final password = _passwordController.text;
 
     if (username.isEmpty || password.isEmpty) {
-      _showSnackBar(
-        'Vui lòng nhập đầy đủ thông tin!',
-        Colors.orange,
-      );
+      _showSnackBar('Vui lòng nhập đầy đủ thông tin!', Colors.orange);
       return;
     }
 
-    setState(() {
-      _isLoading = true;
-    });
+    setState(() => _isLoading = true);
 
     try {
       Map<String, dynamic>? backendAuthData;
@@ -70,8 +65,7 @@ class _LoginScreenState extends State<LoginScreen> {
         );
       } catch (backendError) {
         debugPrint("[LoginScreen] Backend login error: $backendError");
-        // Nếu backend trả lỗi sai mật khẩu hoặc tài khoản không tồn tại, báo lỗi trực tiếp
-        if (backendError is ApiException && (backendError.statusCode == 400 || backendError.statusCode == 401)) {
+        if (backendError is ApiException) {
           if (!mounted) return;
           setState(() => _isLoading = false);
           _showSnackBar(backendError.message, Colors.red);
@@ -79,7 +73,7 @@ class _LoginScreenState extends State<LoginScreen> {
         }
       }
 
-      // 2. Thử xác thực Firebase Auth nếu là email chuẩn
+      // 2. Thử xác thực Firebase Auth nếu là email
       User? fbUser;
       if (username.contains('@')) {
         try {
@@ -102,7 +96,6 @@ class _LoginScreenState extends State<LoginScreen> {
             displayName: fbUser.displayName,
           );
         } else {
-          // Tạo user mới trong SQLite local dựa trên email từ backend
           final newUserId = await DatabaseHelper.instance.registerUser(username, password);
           user = await DatabaseHelper.instance.getUserById(newUserId);
         }
@@ -132,11 +125,8 @@ class _LoginScreenState extends State<LoginScreen> {
         }
       }
 
-      // Đăng ký FCM token sau khi có token
       await _registerFcmToken();
-
-      // Trigger đồng bộ ví & giao dịch
-      SyncService.instance.syncAllPendingTransactions(userId);
+      SyncService.instance.pullAndSyncFromBackend(userId);
 
       setState(() => _isLoading = false);
 
@@ -149,14 +139,12 @@ class _LoginScreenState extends State<LoginScreen> {
       if (!mounted) return;
 
       setState(() => _isLoading = false);
-      _showSnackBar('Có lỗi xảy ra khi đăng nhập: $e', Colors.red);
+      _showSnackBar('Đăng nhập không thành công: $e', Colors.red);
     }
   }
 
   Future<void> _handleGoogleSignIn() async {
-    setState(() {
-      _isLoading = true;
-    });
+    setState(() => _isLoading = true);
 
     try {
       final GoogleSignIn googleSignIn = GoogleSignIn(
@@ -188,8 +176,14 @@ class _LoginScreenState extends State<LoginScreen> {
         throw Exception("Không thể lấy Firebase ID Token.");
       }
 
-      // Đổi Firebase ID Token lấy JWT backend qua /auth/google
-      await ApiService.instance.loginWithGoogle(idToken: firebaseIdToken);
+      try {
+        await ApiService.instance.loginWithGoogle(idToken: firebaseIdToken);
+      } catch (backendErr) {
+        // Đăng nhập backend qua Google thất bại -> hủy trạng thái đăng nhập Firebase
+        await FirebaseAuth.instance.signOut();
+        await googleSignIn.signOut();
+        rethrow;
+      }
 
       final sqliteUser = await DatabaseHelper.instance.findOrCreateUserByFirebaseUid(
         firebaseUid: user.uid,
@@ -206,7 +200,7 @@ class _LoginScreenState extends State<LoginScreen> {
       await prefs.setString('currency', widget.currency);
 
       await _registerFcmToken();
-      SyncService.instance.syncAllPendingTransactions(userId);
+      SyncService.instance.pullAndSyncFromBackend(userId);
 
       if (!mounted) return;
 
@@ -226,6 +220,7 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   void _showSnackBar(String message, Color color) {
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),

@@ -21,6 +21,7 @@ class _ReportsTabState extends State<ReportsTab> {
   int _totalAmount = 0;
   int _monthlyBudget = 10000000;
   Map<String, int> _categoryTotals = {};
+  int _reportRequestId = 0;
 
   StreamSubscription<bool>? _autoTxSub;
 
@@ -43,6 +44,8 @@ class _ReportsTabState extends State<ReportsTab> {
   }
 
   Future<void> _loadReports() async {
+    final currentReqId = ++_reportRequestId;
+
     setState(() {
       _isLoading = true;
     });
@@ -53,12 +56,16 @@ class _ReportsTabState extends State<ReportsTab> {
     _monthlyBudget = prefs.getInt('monthly_budget') ?? 10000000;
 
     if (userId == null) {
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted && currentReqId == _reportRequestId) {
+        setState(() => _isLoading = false);
+      }
       return;
     }
 
     bool fetchedFromBackend = false;
     final now = DateTime.now();
+    int total = 0;
+    Map<String, int> categories = {};
 
     // Thử lấy báo cáo tháng từ C# Backend API
     try {
@@ -71,9 +78,6 @@ class _ReportsTabState extends State<ReportsTab> {
         );
 
         if (reportData.isNotEmpty) {
-          int total = 0;
-          final Map<String, int> categories = {};
-
           if (_modeIndex == 0) {
             total = (reportData['totalExpense'] as num?)?.toInt() ?? 0;
           } else {
@@ -87,15 +91,13 @@ class _ReportsTabState extends State<ReportsTab> {
             for (var item in categoryList) {
               if (item is Map) {
                 final catName = item['categoryName']?.toString() ?? item['category']?.toString() ?? 'Khác';
-                final catAmt = (item['amount'] as num?)?.toInt() ?? 0;
+                final catAmt = ((item['amount'] ?? item['total']) as num?)?.toInt() ?? 0;
                 categories[catName] = catAmt;
               }
             }
           }
 
           if (total > 0 || categories.isNotEmpty) {
-            _totalAmount = total;
-            _categoryTotals = categories;
             fetchedFromBackend = true;
           }
         }
@@ -106,8 +108,8 @@ class _ReportsTabState extends State<ReportsTab> {
 
     // Fallback tính toán từ CSDL SQLite cục bộ nếu không kết nối được backend
     if (!fetchedFromBackend) {
-      int total = 0;
-      final Map<String, int> categories = {};
+      total = 0;
+      categories = {};
 
       try {
         final transactions = await DatabaseHelper.instance.getAllTransactions(userId);
@@ -131,19 +133,19 @@ class _ReportsTabState extends State<ReportsTab> {
             categories[category] = (categories[category] ?? 0) + amount;
           }
         }
-
-        _totalAmount = total;
-        _categoryTotals = categories;
       } catch (e) {
         debugPrint("Local SQLite report load error: $e");
       }
     }
 
-    if (mounted) {
-      setState(() {
-        _isLoading = false;
-      });
-    }
+    // Đảm bảo không ghi đè nếu người dùng đã chuyển tab khác trong khi chờ async
+    if (!mounted || currentReqId != _reportRequestId) return;
+
+    setState(() {
+      _totalAmount = total;
+      _categoryTotals = categories;
+      _isLoading = false;
+    });
   }
 
   String _formatMoney(int amount) {
@@ -215,9 +217,9 @@ class _ReportsTabState extends State<ReportsTab> {
 
     final now = DateTime.now();
 
-    final double circleProgress = _totalAmount == 0
+    final double circleProgress = (_monthlyBudget <= 0 || _totalAmount <= 0)
         ? 0.0
-        : (_totalAmount / _monthlyBudget.toDouble()).clamp(0.05, 1.0);
+        : (_totalAmount / _monthlyBudget.toDouble()).clamp(0.0, 1.0);
 
     return Scaffold(
       backgroundColor: AppColors.background,

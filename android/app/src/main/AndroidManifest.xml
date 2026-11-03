@@ -1,4 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET"/>
+
     <application
         android:label="frontend_nhom6_kiet_tam_app_quanlychitieu"
         android:name="${applicationName}"

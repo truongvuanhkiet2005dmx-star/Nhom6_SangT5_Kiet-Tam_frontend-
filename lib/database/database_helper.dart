@@ -1,8 +1,17 @@
 import 'dart:convert';
 import 'dart:math';
+import 'package:flutter/foundation.dart';
 import 'package:crypto/crypto.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
+
+// Top-level isolate entry point for PBKDF2 background calculation
+String _pbkdf2Isolate(Map<String, dynamic> params) {
+  final password = params['password'] as String;
+  final saltString = params['salt'] as String;
+  final iterations = params['iterations'] as int? ?? 100000;
+  return DatabaseHelper.instance.pbkdf2HmacSha256(password, saltString, iterations: iterations);
+}
 
 class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._init();
@@ -22,7 +31,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 6,
+      version: 7,
       onCreate: _createDB,
       onUpgrade: _onUpgrade,
     );
@@ -32,6 +41,16 @@ class DatabaseHelper {
     final Random rng = Random.secure();
     final List<int> values = List<int>.generate(length, (i) => rng.nextInt(256));
     return base64Url.encode(values);
+  }
+
+  String generateUuid() {
+    final Random rng = Random.secure();
+    final List<int> bytes = List<int>.generate(16, (_) => rng.nextInt(256));
+    bytes[6] = (bytes[6] & 0x0f) | 0x40; // Version 4
+    bytes[8] = (bytes[8] & 0x3f) | 0x80; // Variant 1
+
+    final hex = bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+    return '${hex.substring(0, 8)}-${hex.substring(8, 12)}-${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20, 32)}';
   }
 
   String pbkdf2HmacSha256(String password, String saltString, {int iterations = 100000}) {
@@ -52,6 +71,18 @@ class DatabaseHelper {
     }
 
     return base64Url.encode(result);
+  }
+
+  Future<String> hashPasswordAsync(String password, String saltString, {int iterations = 100000}) async {
+    try {
+      return await compute(_pbkdf2Isolate, {
+        'password': password,
+        'salt': saltString,
+        'iterations': iterations,
+      });
+    } catch (_) {
+      return pbkdf2HmacSha256(password, saltString, iterations: iterations);
+    }
   }
 
   Future<void> _createDB(Database db, int version) async {
@@ -197,7 +228,6 @@ class DatabaseHelper {
       } catch (_) {}
 
       try {
-        // F10 Fix: Dọn dẹp chuỗi rỗng thành NULL trước khi tạo UNIQUE INDEX
         await db.execute("UPDATE users SET firebaseUid = NULL WHERE firebaseUid = '' OR firebaseUid = 'null'");
         await db.execute('''
           CREATE UNIQUE INDEX IF NOT EXISTS idx_users_firebaseUid ON users(firebaseUid) WHERE firebaseUid IS NOT NULL
@@ -227,6 +257,29 @@ class DatabaseHelper {
         ''');
       } catch (_) {}
     }
+
+    if (oldVersion < 7) {
+      try {
+        await db.execute('''
+          ALTER TABLE transactions
+          ADD COLUMN eventId TEXT
+        ''');
+      } catch (_) {}
+
+      try {
+        await db.execute('''
+          ALTER TABLE transactions
+          ADD COLUMN serverId INTEGER
+        ''');
+      } catch (_) {}
+
+      try {
+        await db.execute('''
+          ALTER TABLE wallets
+          ADD COLUMN serverId INTEGER
+        ''');
+      } catch (_) {}
+    }
   }
 
   Future<int> registerUser(
@@ -235,7 +288,7 @@ class DatabaseHelper {
       ) async {
     final db = await instance.database;
     final salt = generateRandomSalt();
-    final hashedPassword = pbkdf2HmacSha256(password, salt);
+    final hashedPassword = await hashPasswordAsync(password, salt);
 
     final userId = await db.insert(
       'users',
@@ -281,7 +334,7 @@ class DatabaseHelper {
     final userId = user['id'] as int;
 
     if (storedSalt != null && storedSalt.isNotEmpty && storedPassword != null) {
-      final hashedCandidate = pbkdf2HmacSha256(password, storedSalt);
+      final hashedCandidate = await hashPasswordAsync(password, storedSalt);
       if (hashedCandidate == storedPassword) {
         return user;
       }
@@ -290,7 +343,7 @@ class DatabaseHelper {
     final sha256Candidate = sha256.convert(utf8.encode(password)).toString();
     if (storedPassword == sha256Candidate) {
       final newSalt = generateRandomSalt();
-      final newHashedPassword = pbkdf2HmacSha256(password, newSalt);
+      final newHashedPassword = await hashPasswordAsync(password, newSalt);
 
       await db.update(
         'users',
@@ -544,21 +597,16 @@ class DatabaseHelper {
       Map<String, dynamic> transaction,
       ) async {
     final db = await instance.database;
+    final txMap = Map<String, dynamic>.from(transaction);
+
+    if (txMap['eventId'] == null || txMap['eventId'].toString().isEmpty) {
+      txMap['eventId'] = generateUuid();
+    }
 
     final id = await db.insert(
       'transactions',
-      transaction,
+      txMap,
     );
-
-    if (transaction['eventId'] == null || transaction['eventId'].toString().isEmpty) {
-      final generatedEventId = 'tx_$id';
-      await db.update(
-        'transactions',
-        {'eventId': generatedEventId},
-        where: 'id = ?',
-        whereArgs: [id],
-      );
-    }
 
     return id;
   }
@@ -671,7 +719,6 @@ class DatabaseHelper {
     return (result.first['total'] as int?) ?? 0;
   }
 
-  // F4 Fix: Hàm tính tổng Thu nhập lọc chính xác theo Tháng & Năm
   Future<int> getMonthIncome(int userId, int year, int month) async {
     final db = await instance.database;
     final monthStr = month < 10 ? '0$month' : '$month';
@@ -688,7 +735,6 @@ class DatabaseHelper {
     return (result.first['total'] as int?) ?? 0;
   }
 
-  // F4 Fix: Hàm tính tổng Chi tiêu lọc chính xác theo Tháng & Năm
   Future<int> getMonthExpense(int userId, int year, int month) async {
     final db = await instance.database;
     final monthStr = month < 10 ? '0$month' : '$month';
@@ -757,5 +803,157 @@ class DatabaseHelper {
     );
     if (result.isEmpty) return null;
     return result.first;
+  }
+
+  // Upsert local records from backend
+  Future<int> upsertWalletFromBackend(int localUserId, Map<String, dynamic> remoteWallet) async {
+    final db = await instance.database;
+    final serverId = (remoteWallet['id'] ?? remoteWallet['walletId']) as int?;
+    final name = remoteWallet['name']?.toString() ?? 'Ví';
+    final balance = (remoteWallet['initialBalance'] ?? remoteWallet['balance'] as num?)?.toInt() ?? 0;
+    final type = remoteWallet['type']?.toString() ?? 'bank';
+
+    if (serverId != null && serverId > 0) {
+      final existingByServerId = await db.query(
+        'wallets',
+        where: 'serverId = ? AND userId = ?',
+        whereArgs: [serverId, localUserId],
+        limit: 1,
+      );
+
+      if (existingByServerId.isNotEmpty) {
+        final localId = existingByServerId.first['id'] as int;
+        await db.update(
+          'wallets',
+          {
+            'name': name,
+            'balance': balance,
+            'type': type,
+          },
+          where: 'id = ?',
+          whereArgs: [localId],
+        );
+        return localId;
+      }
+    }
+
+    final existingByName = await db.query(
+      'wallets',
+      where: 'name = ? AND userId = ?',
+      whereArgs: [name, localUserId],
+      limit: 1,
+    );
+
+    if (existingByName.isNotEmpty) {
+      final localId = existingByName.first['id'] as int;
+      await db.update(
+        'wallets',
+        {
+          'serverId': serverId,
+          'balance': balance,
+          'type': type,
+        },
+        where: 'id = ?',
+        whereArgs: [localId],
+      );
+      return localId;
+    }
+
+    return await db.insert('wallets', {
+      'serverId': serverId,
+      'userId': localUserId,
+      'name': name,
+      'balance': balance,
+      'type': type,
+    });
+  }
+
+  Future<void> upsertTransactionFromBackend(int localUserId, Map<String, dynamic> remoteTx) async {
+    final db = await instance.database;
+    final serverId = (remoteTx['id'] ?? remoteTx['transactionId']) as int?;
+    final eventId = remoteTx['eventId']?.toString();
+    final amount = (remoteTx['amount'] as num?)?.toInt().abs() ?? 0;
+    final type = remoteTx['type']?.toString() ?? 'expense';
+    final isExpense = type == 'income' ? 0 : 1;
+    final categoryName = remoteTx['categoryName']?.toString() ?? 'Khác';
+    final date = remoteTx['occurredAtUtc']?.toString() ?? remoteTx['occurredAt']?.toString() ?? DateTime.now().toUtc().toIso8601String();
+    final note = remoteTx['note']?.toString() ?? '';
+
+    int? localWalletId;
+    final remoteWalletId = (remoteTx['walletId'] as num?)?.toInt();
+    if (remoteWalletId != null && remoteWalletId > 0) {
+      final localWallet = await getWalletByServerId(remoteWalletId);
+      if (localWallet != null) {
+        localWalletId = localWallet['id'] as int?;
+      }
+    }
+
+    if (eventId != null && eventId.isNotEmpty) {
+      final existingByEvent = await getTransactionByEventId(eventId);
+      if (existingByEvent != null) {
+        final localId = existingByEvent['id'] as int;
+        await db.update(
+          'transactions',
+          {
+            'serverId': serverId,
+            'amount': amount,
+            'type': type,
+            'isExpense': isExpense,
+            'categoryName': categoryName,
+            'date': date,
+            'note': note,
+            'isSynced': 1,
+            if (localWalletId != null) 'walletId': localWalletId,
+          },
+          where: 'id = ?',
+          whereArgs: [localId],
+        );
+        return;
+      }
+    }
+
+    if (serverId != null && serverId > 0) {
+      final existingByServer = await db.query(
+        'transactions',
+        where: 'serverId = ? AND userId = ?',
+        whereArgs: [serverId, localUserId],
+        limit: 1,
+      );
+
+      if (existingByServer.isNotEmpty) {
+        final localId = existingByServer.first['id'] as int;
+        await db.update(
+          'transactions',
+          {
+            'amount': amount,
+            'type': type,
+            'isExpense': isExpense,
+            'categoryName': categoryName,
+            'date': date,
+            'note': note,
+            'isSynced': 1,
+            if (eventId != null) 'eventId': eventId,
+            if (localWalletId != null) 'walletId': localWalletId,
+          },
+          where: 'id = ?',
+          whereArgs: [localId],
+        );
+        return;
+      }
+    }
+
+    await db.insert('transactions', {
+      'serverId': serverId,
+      'userId': localUserId,
+      'walletId': localWalletId,
+      'amount': amount,
+      'type': type,
+      'isExpense': isExpense,
+      'categoryName': categoryName,
+      'date': date,
+      'note': note,
+      'isSynced': 1,
+      'eventId': eventId ?? generateUuid(),
+    });
   }
 }
