@@ -72,7 +72,9 @@ class SyncService {
       }
 
       final prefs = await SharedPreferences.getInstance();
-      final int? familyGroupId = (tx['familyGroupId'] as num?)?.toInt() ?? prefs.getInt('activeFamilyGroupId');
+      final int? familyGroupId = tx.containsKey('familyGroupId')
+          ? (tx['familyGroupId'] as num?)?.toInt()
+          : prefs.getInt('activeFamilyGroupId');
 
       String type = tx['type']?.toString() ?? (tx['isExpense'] == 1 ? 'expense' : 'income');
       final String? adjustmentDirection = tx['adjustmentDirection']?.toString() ??
@@ -188,19 +190,7 @@ class SyncService {
       final token = await ApiService.instance.getToken();
       if (token == null || token.isEmpty) return;
 
-      // 1. Đồng bộ ví local chưa có serverId
-      await syncUnsyncedWallets(userId);
-
-      // 2. Gửi các giao dịch local chờ đồng bộ
-      final unsynced = await DatabaseHelper.instance.getUnsyncedTransactions(userId);
-      if (unsynced.isNotEmpty) {
-        debugPrint("[SyncService] Phát hiện ${unsynced.length} giao dịch chờ đồng bộ.");
-        for (var tx in unsynced) {
-          await syncTransaction(tx);
-        }
-      }
-
-      // 3. Tải ví từ Backend về local SQLite (upsert)
+      // 1. Tải ví từ Backend về local SQLite (upsert) trước tiên
       try {
         final remoteWallets = await ApiService.instance.getWallets();
         for (var rw in remoteWallets) {
@@ -210,6 +200,18 @@ class SyncService {
         }
       } catch (e) {
         debugPrint("[SyncService] Lỗi kéo danh sách ví từ backend: $e");
+      }
+
+      // 2. Đồng bộ ví local chưa có serverId
+      await syncUnsyncedWallets(userId);
+
+      // 3. Gửi các giao dịch local chờ đồng bộ
+      final unsynced = await DatabaseHelper.instance.getUnsyncedTransactions(userId);
+      if (unsynced.isNotEmpty) {
+        debugPrint("[SyncService] Phát hiện ${unsynced.length} giao dịch chờ đồng bộ.");
+        for (var tx in unsynced) {
+          await syncTransaction(tx);
+        }
       }
 
       // 4. Tải các giao dịch từ Backend về local SQLite (upsert với phân trang)

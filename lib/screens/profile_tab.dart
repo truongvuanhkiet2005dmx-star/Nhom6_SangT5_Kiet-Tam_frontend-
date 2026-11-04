@@ -5,6 +5,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import '../core/app_colors.dart';
 import '../core/constants.dart';
+import '../database/database_helper.dart';
 import '../services/api_service.dart';
 import '../services/native_listener_bridge.dart';
 import 'welcome_setup_screen.dart';
@@ -123,7 +124,6 @@ class _ProfileTabState extends State<ProfileTab> {
   }
 
   Future<void> _logout() async {
-    // 1. Unregister FCM token trên backend
     try {
       final fcmToken = await FirebaseMessaging.instance.getToken();
       if (fcmToken != null && fcmToken.isNotEmpty) {
@@ -131,10 +131,8 @@ class _ProfileTabState extends State<ProfileTab> {
       }
     } catch (_) {}
 
-    // 2. Clear backend token
     await ApiService.instance.clearToken();
 
-    // 3. Sign out Firebase & Google
     try {
       await FirebaseAuth.instance.signOut();
     } catch (_) {}
@@ -161,6 +159,193 @@ class _ProfileTabState extends State<ProfileTab> {
         builder: (context) => const WelcomeSetupScreen(),
       ),
       (route) => false,
+    );
+  }
+
+  void _showChangePasswordDialog() {
+    final currentPassController = TextEditingController();
+    final newPassController = TextEditingController();
+    final confirmPassController = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: AppColors.card,
+          title: const Text('Đổi mật khẩu', style: TextStyle(color: AppColors.textDark, fontWeight: FontWeight.bold)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: currentPassController,
+                obscureText: true,
+                style: const TextStyle(color: AppColors.textDark),
+                decoration: const InputDecoration(
+                  labelText: 'Mật khẩu hiện tại',
+                  labelStyle: TextStyle(color: AppColors.textSub),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: newPassController,
+                obscureText: true,
+                style: const TextStyle(color: AppColors.textDark),
+                decoration: const InputDecoration(
+                  labelText: 'Mật khẩu mới',
+                  labelStyle: TextStyle(color: AppColors.textSub),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: confirmPassController,
+                obscureText: true,
+                style: const TextStyle(color: AppColors.textDark),
+                decoration: const InputDecoration(
+                  labelText: 'Xác nhận mật khẩu mới',
+                  labelStyle: TextStyle(color: AppColors.textSub),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Hủy', style: TextStyle(color: AppColors.textSub)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
+              onPressed: () async {
+                final curr = currentPassController.text;
+                final next = newPassController.text;
+                final conf = confirmPassController.text;
+
+                if (curr.isEmpty || next.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Vui lòng nhập đầy đủ thông tin!'), backgroundColor: Colors.orange),
+                  );
+                  return;
+                }
+
+                if (next != conf) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Mật khẩu mới không trùng khớp!'), backgroundColor: Colors.orange),
+                  );
+                  return;
+                }
+
+                try {
+                  await ApiService.instance.changePassword(
+                    currentPassword: curr,
+                    newPassword: next,
+                  );
+                  if (!mounted) return;
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Đổi mật khẩu thành công!'), backgroundColor: Colors.green),
+                  );
+                } catch (e) {
+                  if (!mounted) return;
+                  final errorMsg = e is ApiException ? e.message : 'Lỗi đổi mật khẩu: $e';
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text(errorMsg), backgroundColor: Colors.red),
+                  );
+                }
+              },
+              child: const Text('Cập nhật', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _showDeleteAccountDialog() {
+    final passwordController = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: AppColors.card,
+          title: const Text('Xác nhận xóa tài khoản', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'CẢNH BÁO: Thao tác này sẽ xóa vĩnh viễn tài khoản của bạn trên hệ thống. Dữ liệu local của bạn sẽ bị xóa sạch.',
+                style: TextStyle(color: AppColors.textSub, fontSize: 13),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: passwordController,
+                obscureText: true,
+                style: const TextStyle(color: AppColors.textDark),
+                decoration: const InputDecoration(
+                  labelText: 'Nhập mật khẩu để xác nhận',
+                  labelStyle: TextStyle(color: AppColors.textSub),
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Hủy', style: TextStyle(color: AppColors.textSub)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
+              onPressed: () async {
+                final password = passwordController.text;
+                if (password.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Vui lòng nhập mật khẩu!'), backgroundColor: Colors.orange),
+                  );
+                  return;
+                }
+
+                try {
+                  await ApiService.instance.deleteAccount(password: password);
+
+                  final prefs = await SharedPreferences.getInstance();
+                  final currentUserId = prefs.getInt('userId');
+
+                  if (currentUserId != null) {
+                    final db = await DatabaseHelper.instance.database;
+                    await db.delete('transactions', where: 'userId = ?', whereArgs: [currentUserId]);
+                    await db.delete('wallets', where: 'userId = ?', whereArgs: [currentUserId]);
+                    await db.delete('savings_goals', where: 'userId = ?', whereArgs: [currentUserId]);
+                    await db.delete('users', where: 'id = ?', whereArgs: [currentUserId]);
+                  }
+
+                  await ApiService.instance.clearToken();
+                  await prefs.clear();
+
+                  if (!mounted) return;
+                  Navigator.pop(context);
+                  Navigator.pushAndRemoveUntil(
+                    context,
+                    MaterialPageRoute(builder: (context) => const WelcomeSetupScreen()),
+                    (route) => false,
+                  );
+                } catch (e) {
+                  if (!mounted) return;
+                  final errorMsg = e is ApiException ? e.message : 'Không thể xóa tài khoản: $e';
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(errorMsg),
+                      backgroundColor: Colors.red,
+                      duration: const Duration(seconds: 4),
+                    ),
+                  );
+                }
+              },
+              child: const Text('Xóa tài khoản', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            ),
+          ],
+        );
+      },
     );
   }
 
@@ -399,6 +584,13 @@ class _ProfileTabState extends State<ProfileTab> {
 
               _buildMenuCard([
                 _buildMenuItem(
+                  icon: Icons.lock_reset_outlined,
+                  title: 'Đổi mật khẩu',
+                  color: Colors.indigoAccent,
+                  onTap: _showChangePasswordDialog,
+                ),
+                _buildDivider(),
+                _buildMenuItem(
                   icon: Icons.notifications_active_outlined,
                   title: 'Quyền đọc Thông báo App Ngân hàng',
                   color: Colors.amber,
@@ -439,7 +631,25 @@ class _ProfileTabState extends State<ProfileTab> {
                 ),
               ]),
 
-              const SizedBox(height: 28),
+              const SizedBox(height: 20),
+
+              ElevatedButton.icon(
+                onPressed: _showDeleteAccountDialog,
+                icon: const Icon(Icons.delete_forever, size: 20),
+                label: const Text('Xóa tài khoản', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.red.shade900.withValues(alpha: 0.2),
+                  foregroundColor: Colors.redAccent,
+                  elevation: 0,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    side: BorderSide(color: Colors.red.shade700),
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 12),
 
               ElevatedButton.icon(
                 onPressed: _logout,
@@ -668,8 +878,9 @@ class _FamilyWalletModalState extends State<_FamilyWalletModal> {
       widget.onSaved();
     } catch (e) {
       if (!mounted) return;
+      final errorMsg = e is ApiException ? e.message : 'Lỗi tạo nhóm: $e';
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Lỗi tạo nhóm: $e'), backgroundColor: Colors.red),
+        SnackBar(content: Text(errorMsg), backgroundColor: Colors.red),
       );
     } finally {
       if (mounted) setState(() => _isSubmitting = false);
@@ -703,8 +914,9 @@ class _FamilyWalletModalState extends State<_FamilyWalletModal> {
       widget.onSaved();
     } catch (e) {
       if (!mounted) return;
+      final errorMsg = e is ApiException ? e.message : 'Lỗi tham gia nhóm: $e';
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Lỗi tham gia nhóm: $e'), backgroundColor: Colors.red),
+        SnackBar(content: Text(errorMsg), backgroundColor: Colors.red),
       );
     } finally {
       if (mounted) setState(() => _isSubmitting = false);
@@ -727,8 +939,48 @@ class _FamilyWalletModalState extends State<_FamilyWalletModal> {
       );
     } catch (e) {
       if (!mounted) return;
+      final errorMsg = e is ApiException ? e.message : 'Không thể rời nhóm: $e';
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Không thể rời nhóm: $e'), backgroundColor: Colors.red),
+        SnackBar(content: Text(errorMsg), backgroundColor: Colors.red),
+      );
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
+    }
+  }
+
+  Future<void> _deleteMember(int familyId, int memberUserId, String memberName) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppColors.card,
+        title: const Text('Xóa thành viên', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
+        content: Text('Bạn có chắc muốn xóa "$memberName" khỏi nhóm gia đình không?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Hủy', style: TextStyle(color: AppColors.textSub))),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Xóa', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    setState(() => _isSubmitting = true);
+    try {
+      await ApiService.instance.deleteFamilyMember(familyId, memberUserId);
+      if (!mounted) return;
+      await _loadFamilyData();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Đã xóa thành viên $memberName khỏi nhóm!'), backgroundColor: Colors.green),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      final errorMsg = e is ApiException ? e.message : 'Lỗi xóa thành viên: $e';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(errorMsg), backgroundColor: Colors.red),
       );
     } finally {
       if (mounted) setState(() => _isSubmitting = false);
@@ -736,6 +988,25 @@ class _FamilyWalletModalState extends State<_FamilyWalletModal> {
   }
 
   Future<void> _deleteFamily(int familyId) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppColors.card,
+        title: const Text('Xóa nhóm gia đình', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
+        content: const Text('Bạn có chắc muốn giải tán nhóm gia đình này không? Thao tác này không thể hoàn tác.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Hủy', style: TextStyle(color: AppColors.textSub))),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Giải tán nhóm', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
     setState(() => _isSubmitting = true);
     try {
       await ApiService.instance.deleteFamily(familyId);
@@ -751,8 +1022,9 @@ class _FamilyWalletModalState extends State<_FamilyWalletModal> {
       );
     } catch (e) {
       if (!mounted) return;
+      final errorMsg = e is ApiException ? e.message : 'Lỗi xóa nhóm: $e';
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Lỗi xóa nhóm: $e'), backgroundColor: Colors.red),
+        SnackBar(content: Text(errorMsg), backgroundColor: Colors.red),
       );
     } finally {
       if (mounted) setState(() => _isSubmitting = false);
@@ -790,8 +1062,9 @@ class _FamilyWalletModalState extends State<_FamilyWalletModal> {
       );
     } catch (e) {
       if (!mounted) return;
+      final errorMsg = e is ApiException ? e.message : 'Lỗi cập nhật ngân sách: $e';
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Lỗi cập nhật ngân sách: $e'), backgroundColor: Colors.red),
+        SnackBar(content: Text(errorMsg), backgroundColor: Colors.red),
       );
     } finally {
       if (mounted) setState(() => _isSubmitting = false);
@@ -841,6 +1114,7 @@ class _FamilyWalletModalState extends State<_FamilyWalletModal> {
                     final fName = f['name']?.toString() ?? 'Nhóm gia đình';
                     final isSelected = fId == _activeFamilyGroupId;
                     final isOwner = f['isOwner'] == true || f['role']?.toString().toLowerCase() == 'owner';
+                    final members = f['members'] is List ? f['members'] as List : [];
 
                     return Card(
                       color: isSelected ? AppColors.surface : AppColors.card,
@@ -848,41 +1122,95 @@ class _FamilyWalletModalState extends State<_FamilyWalletModal> {
                         borderRadius: BorderRadius.circular(12),
                         side: BorderSide(color: isSelected ? AppColors.primary : AppColors.border),
                       ),
-                      child: ListTile(
-                        title: Text(fName, style: const TextStyle(color: AppColors.textDark, fontWeight: FontWeight.bold)),
-                        subtitle: Text(f['inviteCode'] != null ? 'Mã mời: ${f['inviteCode']}' : '', style: const TextStyle(color: AppColors.textSub, fontSize: 11)),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            if (fId != null) ...[
-                              IconButton(
-                                icon: const Icon(Icons.exit_to_app, color: Colors.orangeAccent, size: 20),
-                                tooltip: 'Rời nhóm',
-                                onPressed: _isSubmitting ? null : () => _leaveFamily(fId),
-                              ),
-                              if (isOwner)
-                                IconButton(
-                                  icon: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 20),
-                                  tooltip: 'Xóa nhóm',
-                                  onPressed: _isSubmitting ? null : () => _deleteFamily(fId),
+                      child: Column(
+                        children: [
+                          ListTile(
+                            title: Text(fName, style: const TextStyle(color: AppColors.textDark, fontWeight: FontWeight.bold)),
+                            subtitle: Text(f['inviteCode'] != null ? 'Mã mời: ${f['inviteCode']}' : '', style: const TextStyle(color: AppColors.textSub, fontSize: 11)),
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                if (fId != null) ...[
+                                  IconButton(
+                                    icon: const Icon(Icons.exit_to_app, color: Colors.orangeAccent, size: 20),
+                                    tooltip: 'Rời nhóm',
+                                    onPressed: _isSubmitting ? null : () => _leaveFamily(fId),
+                                  ),
+                                  if (isOwner)
+                                    IconButton(
+                                      icon: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 20),
+                                      tooltip: 'Xóa nhóm',
+                                      onPressed: _isSubmitting ? null : () => _deleteFamily(fId),
+                                    ),
+                                ],
+                                const SizedBox(width: 4),
+                                isSelected
+                                    ? const Icon(Icons.check_circle, color: AppColors.primary)
+                                    : ElevatedButton(
+                                  style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
+                                  onPressed: () async {
+                                    final prefs = await SharedPreferences.getInstance();
+                                    if (fId != null) {
+                                      await prefs.setInt('activeFamilyGroupId', fId);
+                                      setState(() => _activeFamilyGroupId = fId);
+                                    }
+                                  },
+                                  child: const Text('Chọn', style: TextStyle(color: Colors.black, fontSize: 12)),
                                 ),
-                            ],
-                            const SizedBox(width: 4),
-                            isSelected
-                                ? const Icon(Icons.check_circle, color: AppColors.primary)
-                                : ElevatedButton(
-                              style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
-                              onPressed: () async {
-                                final prefs = await SharedPreferences.getInstance();
-                                if (fId != null) {
-                                  await prefs.setInt('activeFamilyGroupId', fId);
-                                  setState(() => _activeFamilyGroupId = fId);
-                                }
-                              },
-                              child: const Text('Chọn', style: TextStyle(color: Colors.black, fontSize: 12)),
+                              ],
                             ),
-                          ],
-                        ),
+                          ),
+                          if (members.isNotEmpty)
+                            Padding(
+                              padding: const EdgeInsets.only(left: 16, right: 16, bottom: 12),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Divider(height: 1, color: AppColors.border),
+                                  const SizedBox(height: 8),
+                                  const Text('Thành viên nhóm:', style: TextStyle(color: AppColors.textSub, fontSize: 12, fontWeight: FontWeight.bold)),
+                                  const SizedBox(height: 4),
+                                  ...members.map((m) {
+                                    if (m is! Map) return const SizedBox();
+                                    final mUserId = (m['userId'] ?? m['id']) as int?;
+                                    final mName = m['displayName']?.toString() ?? m['username']?.toString() ?? 'Thành viên';
+                                    final mRole = m['accessRole']?.toString() ?? m['role']?.toString() ?? '';
+                                    final mIsOwner = mRole.toLowerCase() == 'owner';
+
+                                    return Padding(
+                                      padding: const EdgeInsets.symmetric(vertical: 2),
+                                      child: Row(
+                                        children: [
+                                          Icon(
+                                            mIsOwner ? Icons.star : Icons.person_outline,
+                                            size: 16,
+                                            color: mIsOwner ? Colors.amber : AppColors.textSub,
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Expanded(
+                                            child: Text(
+                                              '$mName ${mIsOwner ? "(Chủ nhóm)" : ""}',
+                                              style: TextStyle(
+                                                color: AppColors.textDark,
+                                                fontSize: 13,
+                                                fontWeight: mIsOwner ? FontWeight.bold : FontWeight.normal,
+                                              ),
+                                            ),
+                                          ),
+                                          if (isOwner && !mIsOwner && fId != null && mUserId != null)
+                                            IconButton(
+                                              icon: const Icon(Icons.remove_circle_outline, color: Colors.redAccent, size: 18),
+                                              tooltip: 'Xóa khỏi nhóm',
+                                              onPressed: _isSubmitting ? null : () => _deleteMember(fId, mUserId, mName),
+                                            ),
+                                        ],
+                                      ),
+                                    );
+                                  }),
+                                ],
+                              ),
+                            ),
+                        ],
                       ),
                     );
                   }).toList(),

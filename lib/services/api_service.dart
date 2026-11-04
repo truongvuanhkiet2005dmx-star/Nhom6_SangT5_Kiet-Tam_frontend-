@@ -317,6 +317,90 @@ class ApiService {
     }
   }
 
+  Future<Map<String, dynamic>> resetPassword({
+    required String email,
+    required String otp,
+    required String newPassword,
+  }) async {
+    final base = await baseUrl;
+    final uri = Uri.parse('$base/auth/password/reset');
+
+    try {
+      final response = await _client
+          .post(
+            uri,
+            headers: await _headers(withAuth: false),
+            body: jsonEncode({
+              'email': email.trim().toLowerCase(),
+              'otp': otp.trim(),
+              'newPassword': newPassword,
+            }),
+          )
+          .timeout(const Duration(seconds: 15));
+
+      final data = _processResponse(response);
+      return data is Map<String, dynamic> ? data : {};
+    } on SocketException {
+      throw ApiException('Không thể kết nối máy chủ ($base). Hãy kiểm tra lại kết nối mạng.');
+    } catch (e) {
+      if (e is ApiException) rethrow;
+      throw ApiException('Lỗi đặt lại mật khẩu: $e');
+    }
+  }
+
+  Future<Map<String, dynamic>> changePassword({
+    required String currentPassword,
+    required String newPassword,
+  }) async {
+    final base = await baseUrl;
+    final uri = Uri.parse('$base/auth/password/change');
+
+    try {
+      final response = await _client
+          .post(
+            uri,
+            headers: await _headers(withAuth: true),
+            body: jsonEncode({
+              'currentPassword': currentPassword,
+              'newPassword': newPassword,
+            }),
+          )
+          .timeout(const Duration(seconds: 15));
+
+      final data = _processResponse(response);
+      return data is Map<String, dynamic> ? data : {};
+    } on SocketException {
+      throw ApiException('Không thể kết nối máy chủ ($base). Hãy kiểm tra lại kết nối mạng.');
+    } catch (e) {
+      if (e is ApiException) rethrow;
+      throw ApiException('Lỗi đổi mật khẩu: $e');
+    }
+  }
+
+  Future<void> deleteAccount({required String password}) async {
+    final base = await baseUrl;
+    final uri = Uri.parse('$base/auth/account');
+
+    try {
+      final response = await _client
+          .delete(
+            uri,
+            headers: await _headers(withAuth: true),
+            body: jsonEncode({
+              'password': password,
+            }),
+          )
+          .timeout(const Duration(seconds: 15));
+
+      _processResponse(response);
+    } on SocketException {
+      throw ApiException('Không thể kết nối máy chủ ($base). Hãy kiểm tra lại kết nối mạng.');
+    } catch (e) {
+      if (e is ApiException) rethrow;
+      throw ApiException('Lỗi xóa tài khoản: $e');
+    }
+  }
+
   Future<Map<String, dynamic>> getProfile() async {
     final base = await baseUrl;
     final uri = Uri.parse('$base/auth/me');
@@ -480,6 +564,25 @@ class ApiService {
     } catch (e) {
       if (e is ApiException) rethrow;
       throw ApiException('Lỗi rời nhóm gia đình: $e');
+    }
+  }
+
+  Future<void> deleteFamilyMember(int familyGroupId, int memberUserId) async {
+    final base = await baseUrl;
+    final uri = Uri.parse('$base/families/$familyGroupId/members/$memberUserId');
+
+    try {
+      final response = await _client
+          .delete(
+            uri,
+            headers: await _headers(withAuth: true),
+          )
+          .timeout(const Duration(seconds: 10));
+
+      _processResponse(response);
+    } catch (e) {
+      if (e is ApiException) rethrow;
+      throw ApiException('Lỗi xóa thành viên khỏi nhóm: $e');
     }
   }
 
