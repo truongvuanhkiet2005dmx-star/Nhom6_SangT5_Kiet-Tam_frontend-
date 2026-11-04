@@ -359,19 +359,42 @@ class AutoTransactionService {
     final walletName = matchedWallet['name'] as String;
     final currentBalance = matchedWallet['balance'] as int;
 
-    String displayNote = parsed.displayNote ?? rawContent;
+    // Out-of-order / late-arriving message check
+    bool isLateArrivingMessage = false;
+    if (!isNewWallet && parsedAccountBalance != null) {
+      final latestTxRes = await db.query(
+        'transactions',
+        where: 'walletId = ?',
+        orderBy: 'date DESC, id DESC',
+        limit: 1,
+      );
 
+      if (latestTxRes.isNotEmpty) {
+        final latestTxDateStr = latestTxRes.first['date']?.toString();
+        if (latestTxDateStr != null) {
+          final latestTxDate = DateTime.tryParse(latestTxDateStr);
+          if (latestTxDate != null && now.isBefore(latestTxDate.subtract(const Duration(minutes: 10)))) {
+            isLateArrivingMessage = true;
+            debugPrint("[AutoTransactionService] Cảnh báo: Thông báo trễ/cũ hơn mốc thời gian đã ghi nhận. Bỏ qua cập nhật SDC lùi.");
+          }
+        }
+      }
+    }
+
+    String displayNote = parsed.displayNote ?? rawContent;
     final generatedEventId = DatabaseHelper.instance.generateUuid();
 
-    // Calculate expected balance & audit adjustment ONLY for existing wallets
+    // Calculate expected balance & audit adjustment ONLY for existing wallets and non-late messages
     final expectedBalanceAfterTx = isExpense ? (currentBalance - amount) : (currentBalance + amount);
     int? adjustmentDelta;
-    if (!isNewWallet && parsedAccountBalance != null && currentBalance > 0 && parsedAccountBalance != expectedBalanceAfterTx) {
+    if (!isNewWallet && !isLateArrivingMessage && parsedAccountBalance != null && currentBalance > 0 && parsedAccountBalance != expectedBalanceAfterTx) {
       adjustmentDelta = parsedAccountBalance - expectedBalanceAfterTx;
     }
 
     int insertedTxId = 0;
-    int finalWalletBalance = parsedAccountBalance ?? (isNewWallet ? (isExpense ? 0 : amount) : expectedBalanceAfterTx);
+    int finalWalletBalance = (!isLateArrivingMessage && parsedAccountBalance != null)
+        ? parsedAccountBalance
+        : (isNewWallet ? (isExpense ? 0 : amount) : expectedBalanceAfterTx);
 
     await db.transaction((txn) async {
       if (adjustmentDelta != null && adjustmentDelta != 0) {

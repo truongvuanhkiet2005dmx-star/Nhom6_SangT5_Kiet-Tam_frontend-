@@ -122,5 +122,29 @@ ND:thanh toán mua sắm, REQ_ID 155158452425''';
       expect(result.endingBalance, equals(1500000));
       expect(result.refId, equals('998877'));
     });
+
+    test('9. Balance Audit Reconciliation Calculation - Income with SDC', () {
+      final parsed = BankMessageParser.parse('VietinBank: TK:104880072280 GD:+10,000 VND SDC:145,000 VND ND:nhan tien REQ_ID 112233');
+
+      expect(parsed, isNotNull);
+      final currentBalance = 100000;
+      final expectedPostTxBal = parsed!.isExpense ? (currentBalance - parsed.amount) : (currentBalance + parsed.amount);
+      final delta = (parsed.endingBalance ?? 0) - expectedPostTxBal;
+
+      expect(expectedPostTxBal, equals(110000));
+      expect(delta, equals(35000));
+    });
+
+    test('10. Balance Audit Reconciliation Calculation - Expense with SDC Mismatch', () {
+      final parsed = BankMessageParser.parse('VietinBank: TK:104880072280 GD:-20,000 VND SDC:120,000 VND ND:mua do REQ_ID 445566');
+
+      expect(parsed, isNotNull);
+      final currentBalance = 145000;
+      final expectedPostTxBal = parsed!.isExpense ? (currentBalance - parsed.amount) : (currentBalance + parsed.amount);
+      final delta = (parsed.endingBalance ?? 0) - expectedPostTxBal;
+
+      expect(expectedPostTxBal, equals(125000));
+      expect(delta, equals(-5000));
+    });
   });
 }
