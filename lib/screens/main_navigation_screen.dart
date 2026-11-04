@@ -101,7 +101,29 @@ class _MainNavigationScreenState
       return;
     }
 
-    _speechAvailable = await _speech.initialize();
+    _speechAvailable = await _speech.initialize(
+      onStatus: (status) {
+        if (mounted && _isDialogOpen) {
+          final listening = status == 'listening';
+          setDialogState(() {
+            _isListening = listening;
+          });
+          setState(() {
+            _isListening = listening;
+          });
+        }
+      },
+      onError: (error) {
+        if (mounted && _isDialogOpen) {
+          setDialogState(() {
+            _isListening = false;
+          });
+          setState(() {
+            _isListening = false;
+          });
+        }
+      },
+    );
 
     // F1 Fix: Không gán chuỗi lỗi vào _recognizedText khi mic hỏng, tránh hiện nút "Tiếp tục" sai UX
     if (!_speechAvailable) {
@@ -122,6 +144,18 @@ class _MainNavigationScreenState
       localeId = 'en_US';
     } else if (lang == '日本語') {
       localeId = 'ja_JP';
+    } else {
+      try {
+        final systemLoc = await _speech.systemLocale();
+        final locales = await _speech.locales();
+        final hasVi = locales.any((l) => l.localeId == 'vi_VN' || l.localeId == 'vi-VN' || l.localeId.startsWith('vi'));
+        if (hasVi) {
+          final viMatch = locales.firstWhere((l) => l.localeId == 'vi_VN' || l.localeId == 'vi-VN' || l.localeId.startsWith('vi'));
+          localeId = viMatch.localeId;
+        } else if (systemLoc != null) {
+          localeId = systemLoc.localeId;
+        }
+      } catch (_) {}
     }
 
     if (!mounted || !_isDialogOpen) return;
@@ -364,6 +398,16 @@ class _MainNavigationScreenState
                     ElevatedButton(
                       onPressed: () {
                         final parsed = _parseVoiceText(_recognizedText);
+                        final amt = int.tryParse(parsed['amount']?.toString() ?? '0') ?? 0;
+                        if (amt <= 0) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Không thể nhận diện số tiền từ câu nói của bạn. Vui lòng thử nói lại!'),
+                              backgroundColor: Colors.orange,
+                            ),
+                          );
+                          return;
+                        }
                         Navigator.pop(context);
                         _openAddTransaction(
                           amount: parsed['amount'],

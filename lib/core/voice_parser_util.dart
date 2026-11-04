@@ -7,8 +7,7 @@ class VoiceParserUtil {
     String lower = text.toLowerCase();
     int amount = 0;
 
-    // F1 Fix: Dùng (?!\p{L}) thay vì \b để regex hoạt động đúng với Tiếng Việt có dấu
-    // 1. Shorthand "50k", "100k", "20k"
+    // 1. Shorthand "50k", "100k", "20k", "50 nghìn", "100 ngàn"
     final kRegex = RegExp(r'(\d+(?:[.,]\d+)?)\s*(k|nghìn|ngàn)(?!\p{L})', caseSensitive: false, unicode: true);
     final kMatch = kRegex.firstMatch(lower);
     if (kMatch != null) {
@@ -16,7 +15,28 @@ class VoiceParserUtil {
       amount = (numVal * 1000).round();
     }
 
-    // 2. Shorthand "1.5 triệu", "2 tr", "1 triệu"
+    // 2. Shorthand "củ" (Ví dụ: "5 củ" = 5.000.000đ, "1.5 củ" = 1.500.000đ)
+    if (amount == 0) {
+      final cuRegex = RegExp(r'(\d+(?:[.,]\d+)?)\s*(củ)(?!\p{L})', caseSensitive: false, unicode: true);
+      final cuMatch = cuRegex.firstMatch(lower);
+      if (cuMatch != null) {
+        double numVal = double.tryParse(cuMatch.group(1)!.replaceAll(',', '.')) ?? 0;
+        amount = (numVal * 1000000).round();
+      }
+    }
+
+    // 3. Shorthand "triệu rưỡi", "1 triệu rưỡi", "2 triệu", "1.5 tr"
+    if (amount == 0) {
+      final trieuRuoiRegex = RegExp(r'(\d+(?:[.,]\d+)?)\s*(?:triệu|tr(?!\p{L}))\s*rưỡi', caseSensitive: false, unicode: true);
+      final trieuRuoiMatch = trieuRuoiRegex.firstMatch(lower);
+      if (trieuRuoiMatch != null) {
+        double numVal = double.tryParse(trieuRuoiMatch.group(1)!.replaceAll(',', '.')) ?? 1;
+        amount = (numVal * 1000000 + 500000).round();
+      } else if (lower.contains('triệu rưỡi') || lower.contains('tr rưỡi')) {
+        amount = 1500000;
+      }
+    }
+
     if (amount == 0) {
       final trieuRegex = RegExp(r'(\d+(?:[.,]\d+)?)\s*(triệu|tr(?!\p{L}))', caseSensitive: false, unicode: true);
       final trieuMatch = trieuRegex.firstMatch(lower);
@@ -26,7 +46,29 @@ class VoiceParserUtil {
       }
     }
 
-    // 3. Shorthand "200 trăm nghìn"
+    // 4. Shorthand "trăm rưỡi", "1 trăm rưỡi"
+    if (amount == 0 && (lower.contains('trăm rưỡi') || lower.contains('trăm rưỡ'))) {
+      final tramRuoiRegex = RegExp(r'(\d+)\s*trăm\s*rưỡi', caseSensitive: false, unicode: true);
+      final tramRuoiMatch = tramRuoiRegex.firstMatch(lower);
+      if (tramRuoiMatch != null) {
+        int numVal = int.tryParse(tramRuoiMatch.group(1)!) ?? 1;
+        amount = numVal * 100000 + 50000;
+      } else {
+        amount = 150000;
+      }
+    }
+
+    // 5. Shorthand "lít", "xị", "sị" (Ví dụ: "2 lít" = 200.000đ)
+    if (amount == 0) {
+      final litRegex = RegExp(r'(\d+(?:[.,]\d+)?)\s*(lít|xị|sị)(?!\p{L})', caseSensitive: false, unicode: true);
+      final litMatch = litRegex.firstMatch(lower);
+      if (litMatch != null) {
+        double numVal = double.tryParse(litMatch.group(1)!.replaceAll(',', '.')) ?? 0;
+        amount = (numVal * 100000).round();
+      }
+    }
+
+    // 6. Shorthand "200 trăm nghìn"
     if (amount == 0) {
       final tramNghinRegex = RegExp(r'(\d+(?:[.,]\d+)?)\s*(trăm nghìn|trăm ngàn)', caseSensitive: false, unicode: true);
       final tramNghinMatch = tramNghinRegex.firstMatch(lower);
@@ -36,7 +78,7 @@ class VoiceParserUtil {
       }
     }
 
-    // 4. Raw digits e.g. "50000"
+    // 7. Raw digits e.g. "50000"
     if (amount == 0) {
       final digitRegex = RegExp(r'(\d{4,12})');
       final digitMatch = digitRegex.firstMatch(lower);
@@ -45,23 +87,27 @@ class VoiceParserUtil {
       }
     }
 
-    // 5. Full Vietnamese word-number parser (Fix #1 & #28)
+    // 8. Full Vietnamese word-number parser
     if (amount == 0 && (lower.contains('ngàn') || lower.contains('nghìn') || lower.contains('trăm') || lower.contains('triệu') || lower.contains('mươi') || lower.contains('mười'))) {
       amount = _parseVietnameseWordsToNumber(lower);
     }
 
     String category = 'Khác';
-    if (lower.contains('ăn') || lower.contains('cà phê') || lower.contains('phở') || lower.contains('cơm') || lower.contains('uống') || lower.contains('trà')) {
+    if (lower.contains('ăn') || lower.contains('cà phê') || lower.contains('phở') || lower.contains('cơm') || lower.contains('uống') || lower.contains('trà') || lower.contains('bún') || lower.contains('lẩu') || lower.contains('bánh')) {
       category = 'Đồ ăn';
-    } else if (lower.contains('xe') || lower.contains('xăng') || lower.contains('grab') || lower.contains('đi lại') || lower.contains('bus')) {
+    } else if (lower.contains('xe') || lower.contains('xăng') || lower.contains('grab') || lower.contains('đi lại') || lower.contains('bus') || lower.contains('gửi xe') || lower.contains('taxi')) {
       category = 'Đi lại';
-    } else if (lower.contains('mua') || lower.contains('shopee') || lower.contains('sắm') || lower.contains('quần áo')) {
+    } else if (lower.contains('mua') || lower.contains('shopee') || lower.contains('sắm') || lower.contains('quần áo') || lower.contains('giày') || lower.contains('siêu thị') || lower.contains('lazada') || lower.contains('tiki')) {
       category = 'Mua sắm';
-    } else if (lower.contains('điện thoại') || lower.contains('nạp thẻ') || lower.contains('4g')) {
+    } else if (lower.contains('hóa đơn') || lower.contains('tiền điện') || lower.contains('tiền nước') || lower.contains('điện') || lower.contains('nước') || lower.contains('internet') || lower.contains('truyền hình')) {
+      category = 'Hóa đơn';
+    } else if (lower.contains('điện thoại') || lower.contains('nạp thẻ') || lower.contains('4g') || lower.contains('mạng') || lower.contains('wifi')) {
       category = 'Điện thoại';
-    } else if (lower.contains('phim') || lower.contains('xem') || lower.contains('chơi') || lower.contains('game')) {
+    } else if (lower.contains('thuốc') || lower.contains('bệnh viện') || lower.contains('khám') || lower.contains('sức khỏe') || lower.contains('nha khoa')) {
+      category = 'Sức khỏe';
+    } else if (lower.contains('phim') || lower.contains('xem') || lower.contains('chơi') || lower.contains('game') || lower.contains('karaoke')) {
       category = 'Giải trí';
-    } else if (lower.contains('lương') || lower.contains('thưởng')) {
+    } else if (lower.contains('lương') || lower.contains('thưởng') || lower.contains('thu nhập')) {
       category = 'Lương';
     }
 
@@ -75,11 +121,10 @@ class VoiceParserUtil {
   static int _parseVietnameseWordsToNumber(String text) {
     int total = 0;
 
-    // Phân tách nhánh hàng Triệu
     if (text.contains('triệu') || text.contains(' tr ')) {
       final parts = text.split(RegExp(r'triệu|tr(?!\p{L})', unicode: true));
       int millions = _parseSubThousand(parts[0]);
-      if (millions == 0) millions = 1; // e.g. "một triệu"
+      if (millions == 0) millions = 1;
       total += millions * 1000000;
 
       if (parts.length > 1 && parts[1].trim().isNotEmpty) {
@@ -108,7 +153,6 @@ class VoiceParserUtil {
     return _parseSubThousand(text);
   }
 
-  // F2 Fix: Tách token từ từ trái sang phải, bóc tách cụm đã khớp để không bao giờ bị cộng dồn trùng lặp
   static int _parseSubThousand(String text) {
     int sum = 0;
     String t = text;

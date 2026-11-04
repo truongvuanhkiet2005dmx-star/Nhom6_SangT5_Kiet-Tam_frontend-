@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 import '../core/app_colors.dart';
@@ -934,6 +935,22 @@ class _VoiceInputModalState extends State<_VoiceInputModal> {
 
   Future<void> _initSpeech() async {
     try {
+      final micStatus = await Permission.microphone.request();
+      if (!micStatus.isGranted) {
+        if (!mounted) return;
+        setState(() {
+          _isAvailable = false;
+          _liveText = 'Chưa được cấp quyền Micro. Vui lòng bật quyền trong Cài đặt.';
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Vui lòng cấp quyền Micro trong Cài đặt điện thoại!'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        return;
+      }
+
       bool available = await _speech.initialize(
         onStatus: (status) {
           if (mounted) {
@@ -957,13 +974,30 @@ class _VoiceInputModalState extends State<_VoiceInputModal> {
         });
 
         if (available) {
+          try {
+            final systemLoc = await _speech.systemLocale();
+            final locales = await _speech.locales();
+            final hasVi = locales.any((l) => l.localeId == 'vi_VN' || l.localeId == 'vi-VN' || l.localeId.startsWith('vi'));
+            if (hasVi) {
+              final viMatch = locales.firstWhere((l) => l.localeId == 'vi_VN' || l.localeId == 'vi-VN' || l.localeId.startsWith('vi'));
+              _selectedLocale = viMatch.localeId;
+            } else if (systemLoc != null) {
+              _selectedLocale = systemLoc.localeId;
+            }
+          } catch (_) {}
+
           _startListening();
+        } else {
+          setState(() {
+            _liveText = 'Không thể khởi tạo dịch vụ nhận diện giọng nói.';
+          });
         }
       }
     } catch (e) {
       if (mounted) {
         setState(() {
           _isAvailable = false;
+          _liveText = 'Lỗi khởi tạo Micro: $e';
         });
       }
     }
