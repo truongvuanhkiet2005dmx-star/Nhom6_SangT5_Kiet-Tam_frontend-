@@ -191,8 +191,11 @@ class SyncService {
       if (token == null || token.isEmpty) return;
 
       // 1. Tải ví từ Backend về local SQLite (upsert) trước tiên
+      bool isGetWalletsSuccess = false;
+      List<dynamic> remoteWallets = [];
       try {
-        final remoteWallets = await ApiService.instance.getWallets();
+        remoteWallets = await ApiService.instance.getWallets();
+        isGetWalletsSuccess = true;
         for (var rw in remoteWallets) {
           if (rw is Map<String, dynamic>) {
             await DatabaseHelper.instance.upsertWalletFromBackend(userId, rw);
@@ -202,19 +205,21 @@ class SyncService {
         debugPrint("[SyncService] Lỗi kéo danh sách ví từ backend: $e");
       }
 
-      // Kiểm tra nếu tài khoản hoàn toàn chưa có ví cả trên server lẫn local -> tạo ví mặc định
-      final localWallets = await DatabaseHelper.instance.getWallets(userId);
-      if (localWallets.isEmpty) {
-        final newClientId = DatabaseHelper.instance.generateUuid();
-        await DatabaseHelper.instance.insertWallet({
-          'userId': userId,
-          'name': 'Ví tiền mặt',
-          'balance': 0,
-          'initialBalance': 0,
-          'type': 'cash',
-          'accountNumber': '',
-          'clientId': newClientId,
-        });
+      // Chỉ tạo ví mặc định local khi API getWallets() THÀNH CÔNG và cả server lẫn local đều chưa có ví
+      if (isGetWalletsSuccess && remoteWallets.isEmpty) {
+        final localWallets = await DatabaseHelper.instance.getWallets(userId);
+        if (localWallets.isEmpty) {
+          final newClientId = DatabaseHelper.instance.generateUuid();
+          await DatabaseHelper.instance.insertWallet({
+            'userId': userId,
+            'name': 'Ví tiền mặt',
+            'balance': 0,
+            'initialBalance': 0,
+            'type': 'cash',
+            'accountNumber': '',
+            'clientId': newClientId,
+          });
+        }
       }
 
       // 2. Đồng bộ ví local chưa có serverId

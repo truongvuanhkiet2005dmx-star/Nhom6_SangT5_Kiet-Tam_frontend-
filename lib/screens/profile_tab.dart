@@ -1149,11 +1149,12 @@ class _FamilyWalletModalState extends State<_FamilyWalletModal> {
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 if (fId != null) ...[
-                                  IconButton(
-                                    icon: const Icon(Icons.exit_to_app, color: Colors.orangeAccent, size: 20),
-                                    tooltip: 'Rời nhóm',
-                                    onPressed: _isSubmitting ? null : () => _leaveFamily(fId),
-                                  ),
+                                  if (!isOwner)
+                                    IconButton(
+                                      icon: const Icon(Icons.exit_to_app, color: Colors.orangeAccent, size: 20),
+                                      tooltip: 'Rời nhóm',
+                                      onPressed: _isSubmitting ? null : () => _leaveFamily(fId),
+                                    ),
                                   if (isOwner)
                                     IconButton(
                                       icon: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 20),
