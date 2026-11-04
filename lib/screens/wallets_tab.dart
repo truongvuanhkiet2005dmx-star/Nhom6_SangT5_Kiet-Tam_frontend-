@@ -574,11 +574,48 @@ class _EditWalletDialogState extends State<_EditWalletDialog> {
                 await DatabaseHelper.instance.deleteWallet(walletId);
               } catch (e) {
                 if (!mounted) return;
+                if (e is ApiException && e.statusCode == 409) {
+                  final shouldArchive = await showDialog<bool>(
+                    context: context,
+                    builder: (ctx) => AlertDialog(
+                      backgroundColor: AppColors.card,
+                      title: const Text('Không thể xóa vĩnh viễn', style: TextStyle(color: AppColors.textDark, fontWeight: FontWeight.bold)),
+                      content: const Text(
+                        'Ví này có chứa các giao dịch trong lịch sử nên không thể xóa vĩnh viễn.\n\n'
+                        'Bấm "Lưu trữ / Ẩn ví" để ẩn ví khỏi danh sách hoạt động mà vẫn bảo lưu đầy đủ lịch sử giao dịch.',
+                        style: TextStyle(color: AppColors.textSub, fontSize: 13),
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(ctx, false),
+                          child: const Text('Hủy', style: TextStyle(color: AppColors.textSub)),
+                        ),
+                        ElevatedButton(
+                          style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
+                          onPressed: () => Navigator.pop(ctx, true),
+                          child: const Text('Lưu trữ / Ẩn ví', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+                        ),
+                      ],
+                    ),
+                  );
+
+                  if (shouldArchive == true) {
+                    await DatabaseHelper.instance.archiveWallet(walletId);
+                    if (!mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Đã lưu trữ ví thành công. Lịch sử giao dịch được giữ nguyên!'),
+                        backgroundColor: Colors.green,
+                      ),
+                    );
+                    Navigator.pop(context, true);
+                  }
+                  return;
+                }
+
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
-                    content: Text(e is ApiException && e.statusCode == 409
-                        ? 'Không thể xóa ví vì có giao dịch đang liên kết trên máy chủ.'
-                        : 'Không thể xóa ví: $e'),
+                    content: Text('Không thể xóa ví: $e'),
                     backgroundColor: Colors.red,
                   ),
                 );

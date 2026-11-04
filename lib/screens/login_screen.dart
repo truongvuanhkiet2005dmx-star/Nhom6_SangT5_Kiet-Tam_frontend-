@@ -24,10 +24,13 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   final TextEditingController _emailController = TextEditingController();
+  final TextEditingController _passwordController = TextEditingController();
   final TextEditingController _codeController = TextEditingController();
 
-  int _step = 1; // 1: Nhập Email, 2: Nhập mã OTP
+  int _modeIndex = 0; // 0: Đăng nhập bằng Mật khẩu, 1: Đăng nhập bằng OTP qua email
+  int _step = 1; // Dành cho luồng OTP (1: Nhập email, 2: Nhập OTP)
   bool _isLoading = false;
+  bool _obscurePassword = true;
   int _timerSeconds = 60;
   Timer? _timer;
 
@@ -35,6 +38,7 @@ class _LoginScreenState extends State<LoginScreen> {
   void dispose() {
     _timer?.cancel();
     _emailController.dispose();
+    _passwordController.dispose();
     _codeController.dispose();
     super.dispose();
   }
@@ -61,6 +65,82 @@ class _LoginScreenState extends State<LoginScreen> {
       }
     } catch (e) {
       debugPrint("[LoginScreen] FCM token registration warning: $e");
+    }
+  }
+
+  Future<void> _processSuccessfulLogin(
+    String email,
+    Map<String, dynamic> responseData,
+  ) async {
+    String? displayName;
+    if (responseData.containsKey('user') && responseData['user'] is Map) {
+      final uMap = responseData['user'] as Map;
+      displayName = uMap['displayName']?.toString();
+    }
+
+    final sqliteUser = await DatabaseHelper.instance.findOrCreateUserByEmail(
+      email: email,
+      displayName: displayName,
+    );
+
+    final userId = sqliteUser['id'] as int;
+    final prefs = await SharedPreferences.getInstance();
+
+    await prefs.setBool('isLoggedIn', true);
+    await prefs.setInt('userId', userId);
+    await prefs.setString('username', sqliteUser['username'] as String);
+    await prefs.setString('language', widget.language);
+    await prefs.setString('currency', widget.currency);
+
+    if (displayName != null && displayName.isNotEmpty) {
+      await prefs.setString('displayName', displayName);
+    }
+
+    await _registerFcmToken();
+    SyncService.instance.pullAndSyncFromBackend(userId);
+
+    if (!mounted) return;
+
+    setState(() => _isLoading = false);
+
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (context) => const MainNavigationScreen()),
+      (route) => false,
+    );
+  }
+
+  Future<void> _handlePasswordLogin() async {
+    final email = _emailController.text.trim();
+    final password = _passwordController.text;
+
+    if (email.isEmpty || !email.contains('@')) {
+      _showSnackBar('Vui lòng nhập Email hợp lệ!', Colors.orange);
+      return;
+    }
+
+    if (password.isEmpty) {
+      _showSnackBar('Vui lòng nhập mật khẩu!', Colors.orange);
+      return;
+    }
+
+    setState(() => _isLoading = true);
+
+    try {
+      final responseData = await ApiService.instance.login(email: email, password: password);
+      await _processSuccessfulLogin(email, responseData);
+    } catch (e) {
+      if (!mounted) return;
+
+      setState(() => _isLoading = false);
+      final currentServerUrl = await ApiService.instance.baseUrl;
+      final errorStr = e.toString();
+      String userFriendlyMessage = e is ApiException ? e.message : 'Đăng nhập mật khẩu thất bại: $e';
+
+      if (errorStr.contains('Timeout') || errorStr.contains('SocketException') || errorStr.contains('refused')) {
+        userFriendlyMessage = 'Không thể kết nối Server ($currentServerUrl). Hãy chạm nút 🌐 ở góc trên để đổi IP hoặc ngrok URL!';
+      }
+      _showSnackBar(userFriendlyMessage, Colors.red);
     }
   }
 
@@ -94,7 +174,7 @@ class _LoginScreenState extends State<LoginScreen> {
       final errorStr = e.toString();
       String userFriendlyMessage = e is ApiException ? e.message : 'Không thể gửi mã OTP: $e';
       if (errorStr.contains('Timeout') || errorStr.contains('SocketException') || errorStr.contains('refused')) {
-        userFriendlyMessage = 'Không thể kết nối Server ($currentServerUrl). Hãy chạm nút 🌐 ở góc trên để chỉnh IP máy tính hoặc ngrok URL!';
+        userFriendlyMessage = 'Không thể kết nối Server ($currentServerUrl). Hãy chạm nút 🌐 ở góc trên để đổi IP hoặc ngrok URL!';
       }
       _showSnackBar(userFriendlyMessage, Colors.red);
     }
@@ -113,43 +193,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
     try {
       final responseData = await ApiService.instance.verifyOtp(email: email, code: code);
-
-      String? displayName;
-      if (responseData.containsKey('user') && responseData['user'] is Map) {
-        final uMap = responseData['user'] as Map;
-        displayName = uMap['displayName']?.toString();
-      }
-
-      final sqliteUser = await DatabaseHelper.instance.findOrCreateUserByEmail(
-        email: email,
-        displayName: displayName,
-      );
-
-      final userId = sqliteUser['id'] as int;
-      final prefs = await SharedPreferences.getInstance();
-
-      await prefs.setBool('isLoggedIn', true);
-      await prefs.setInt('userId', userId);
-      await prefs.setString('username', sqliteUser['username'] as String);
-      await prefs.setString('language', widget.language);
-      await prefs.setString('currency', widget.currency);
-
-      if (displayName != null && displayName.isNotEmpty) {
-        await prefs.setString('displayName', displayName);
-      }
-
-      await _registerFcmToken();
-      SyncService.instance.pullAndSyncFromBackend(userId);
-
-      if (!mounted) return;
-
-      setState(() => _isLoading = false);
-
-      Navigator.pushAndRemoveUntil(
-        context,
-        MaterialPageRoute(builder: (context) => const MainNavigationScreen()),
-        (route) => false,
-      );
+      await _processSuccessfulLogin(email, responseData);
     } catch (e) {
       if (!mounted) return;
 
@@ -254,7 +298,7 @@ class _LoginScreenState extends State<LoginScreen> {
             size: 20,
           ),
           onPressed: () {
-            if (_step == 2) {
+            if (_modeIndex == 1 && _step == 2) {
               setState(() => _step = 1);
             } else {
               Navigator.pop(context);
@@ -280,9 +324,9 @@ class _LoginScreenState extends State<LoginScreen> {
             children: [
               const SizedBox(height: 10),
 
-              Text(
-                _step == 1 ? 'Đăng Nhập Email OTP' : 'Nhập Mã OTP',
-                style: const TextStyle(
+              const Text(
+                'Đăng Nhập Tài Khoản',
+                style: TextStyle(
                   fontSize: 28,
                   fontWeight: FontWeight.bold,
                   color: AppColors.textDark,
@@ -299,9 +343,78 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
               ),
 
-              const SizedBox(height: 28),
+              const SizedBox(height: 20),
 
-              if (_step == 1) ...[
+              // Segmented Toggle Switch: Mật khẩu vs Mã OTP
+              Container(
+                padding: const EdgeInsets.all(4),
+                decoration: BoxDecoration(
+                  color: AppColors.surface,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: GestureDetector(
+                        onTap: () {
+                          setState(() {
+                            _modeIndex = 0;
+                            _step = 1;
+                          });
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                          decoration: BoxDecoration(
+                            color: _modeIndex == 0 ? AppColors.card : Colors.transparent,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          alignment: Alignment.center,
+                          child: Text(
+                            'Mật khẩu',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
+                              color: _modeIndex == 0 ? AppColors.primary : AppColors.textSub,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      child: GestureDetector(
+                        onTap: () {
+                          setState(() {
+                            _modeIndex = 1;
+                            _step = 1;
+                          });
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                          decoration: BoxDecoration(
+                            color: _modeIndex == 1 ? AppColors.card : Colors.transparent,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          alignment: Alignment.center,
+                          child: Text(
+                            'Mã OTP Email',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
+                              color: _modeIndex == 1 ? AppColors.primary : AppColors.textSub,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 24),
+
+              // Mode 0: Mật khẩu
+              if (_modeIndex == 0) ...[
                 const Text(
                   'Địa chỉ Email / Gmail',
                   style: TextStyle(
@@ -317,7 +430,139 @@ class _LoginScreenState extends State<LoginScreen> {
                   keyboardType: TextInputType.emailAddress,
                   style: const TextStyle(color: AppColors.textDark),
                   decoration: InputDecoration(
-                    hintText: 'Nhập email của bạn (ví dụ: user@gmail.com)...',
+                    hintText: 'Nhập email (ví dụ: user@gmail.com)...',
+                    hintStyle: const TextStyle(
+                      color: AppColors.textSub,
+                      fontSize: 14,
+                    ),
+                    prefixIcon: const Icon(
+                      Icons.email_outlined,
+                      color: AppColors.primary,
+                    ),
+                    filled: true,
+                    fillColor: AppColors.card,
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      borderSide: const BorderSide(
+                        color: AppColors.border,
+                      ),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      borderSide: const BorderSide(
+                        color: AppColors.primary,
+                        width: 1.5,
+                      ),
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 16),
+
+                const Text(
+                  'Mật khẩu',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textDark,
+                  ),
+                ),
+
+                const SizedBox(height: 8),
+
+                TextField(
+                  controller: _passwordController,
+                  obscureText: _obscurePassword,
+                  style: const TextStyle(color: AppColors.textDark),
+                  decoration: InputDecoration(
+                    hintText: 'Nhập mật khẩu tài khoản...',
+                    hintStyle: const TextStyle(
+                      color: AppColors.textSub,
+                      fontSize: 14,
+                    ),
+                    prefixIcon: const Icon(
+                      Icons.lock_outline,
+                      color: AppColors.primary,
+                    ),
+                    suffixIcon: IconButton(
+                      icon: Icon(
+                        _obscurePassword ? Icons.visibility_off : Icons.visibility,
+                        color: AppColors.textSub,
+                      ),
+                      onPressed: () {
+                        setState(() {
+                          _obscurePassword = !_obscurePassword;
+                        });
+                      },
+                    ),
+                    filled: true,
+                    fillColor: AppColors.card,
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      borderSide: const BorderSide(
+                        color: AppColors.border,
+                      ),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      borderSide: const BorderSide(
+                        color: AppColors.primary,
+                        width: 1.5,
+                      ),
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 24),
+
+                ElevatedButton(
+                  onPressed: _isLoading ? null : _handlePasswordLogin,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.black,
+                    elevation: 0,
+                    padding: const EdgeInsets.symmetric(
+                      vertical: 16,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                  ),
+                  child: _isLoading
+                      ? const SizedBox(
+                          height: 20,
+                          width: 20,
+                          child: CircularProgressIndicator(
+                            color: Colors.black,
+                            strokeWidth: 2,
+                          ),
+                        )
+                      : const Text(
+                          'Đăng Nhập',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                ),
+              ]
+              // Mode 1: Mã OTP
+              else if (_step == 1) ...[
+                const Text(
+                  'Địa chỉ Email / Gmail',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textDark,
+                  ),
+                ),
+
+                const SizedBox(height: 8),
+
+                TextField(
+                  controller: _emailController,
+                  keyboardType: TextInputType.emailAddress,
+                  style: const TextStyle(color: AppColors.textDark),
+                  decoration: InputDecoration(
+                    hintText: 'Nhập email (ví dụ: user@gmail.com)...',
                     hintStyle: const TextStyle(
                       color: AppColors.textSub,
                       fontSize: 14,
@@ -361,20 +606,20 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   child: _isLoading
                       ? const SizedBox(
-                    height: 20,
-                    width: 20,
-                    child: CircularProgressIndicator(
-                      color: Colors.black,
-                      strokeWidth: 2,
-                    ),
-                  )
+                          height: 20,
+                          width: 20,
+                          child: CircularProgressIndicator(
+                            color: Colors.black,
+                            strokeWidth: 2,
+                          ),
+                        )
                       : const Text(
-                    'Gửi Mã OTP',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
+                          'Gửi Mã OTP Qua Email',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
                 ),
               ] else ...[
                 Container(
@@ -388,9 +633,9 @@ class _LoginScreenState extends State<LoginScreen> {
                     children: [
                       const Icon(Icons.mark_email_read_outlined, size: 40, color: AppColors.primary),
                       const SizedBox(height: 8),
-                      Text(
+                      const Text(
                         'Mã xác thực đã được gửi tới:',
-                        style: const TextStyle(color: AppColors.textSub, fontSize: 13),
+                        style: TextStyle(color: AppColors.textSub, fontSize: 13),
                       ),
                       const SizedBox(height: 4),
                       Text(
@@ -471,20 +716,20 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   child: _isLoading
                       ? const SizedBox(
-                    height: 20,
-                    width: 20,
-                    child: CircularProgressIndicator(
-                      color: Colors.black,
-                      strokeWidth: 2,
-                    ),
-                  )
+                          height: 20,
+                          width: 20,
+                          child: CircularProgressIndicator(
+                            color: Colors.black,
+                            strokeWidth: 2,
+                          ),
+                        )
                       : const Text(
-                    'Xác Minh & Đăng Nhập',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
+                          'Xác Minh & Đăng Nhập',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
                 ),
 
                 const SizedBox(height: 16),

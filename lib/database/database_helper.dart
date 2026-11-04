@@ -32,7 +32,7 @@ class DatabaseHelper {
 
     final db = await openDatabase(
       path,
-      version: 12,
+      version: 13,
       onCreate: _createDB,
       onUpgrade: _onUpgrade,
     );
@@ -111,6 +111,7 @@ class DatabaseHelper {
         initialBalance INTEGER NOT NULL DEFAULT 0,
         type TEXT NOT NULL,
         accountNumber TEXT,
+        isArchived INTEGER NOT NULL DEFAULT 0,
         FOREIGN KEY (userId) REFERENCES users(id)
       )
     ''');
@@ -439,6 +440,17 @@ class DatabaseHelper {
         debugPrint("[DatabaseHelper] Migration v12 warning: $e");
       }
     }
+
+    if (oldVersion < 13) {
+      try {
+        await db.execute('''
+          ALTER TABLE wallets
+          ADD COLUMN isArchived INTEGER NOT NULL DEFAULT 0
+        ''');
+      } catch (e) {
+        debugPrint("[DatabaseHelper] Migration v13 warning: $e");
+      }
+    }
   }
 
   Future<int> registerUser(
@@ -652,15 +664,35 @@ class DatabaseHelper {
   }
 
   Future<List<Map<String, dynamic>>> getWallets(
-      int userId,
-      ) async {
+    int userId, {
+    bool includeArchived = false,
+  }) async {
     final db = await instance.database;
+
+    if (includeArchived) {
+      return await db.query(
+        'wallets',
+        where: 'userId = ?',
+        whereArgs: [userId],
+        orderBy: 'id ASC',
+      );
+    }
 
     return await db.query(
       'wallets',
-      where: 'userId = ?',
+      where: 'userId = ? AND (isArchived IS NULL OR isArchived = 0)',
       whereArgs: [userId],
       orderBy: 'id ASC',
+    );
+  }
+
+  Future<int> archiveWallet(int walletId) async {
+    final db = await instance.database;
+    return await db.update(
+      'wallets',
+      {'isArchived': 1},
+      where: 'id = ?',
+      whereArgs: [walletId],
     );
   }
 
