@@ -26,6 +26,7 @@ class SyncService {
         final balance = (wallet['balance'] as num?)?.toInt() ?? 0;
         final type = wallet['type']?.toString() ?? 'cash';
         final accountNumber = wallet['accountNumber']?.toString();
+        final clientId = wallet['clientId']?.toString() ?? DatabaseHelper.instance.generateUuid();
 
         try {
           final res = await ApiService.instance.createWallet(
@@ -33,6 +34,7 @@ class SyncService {
             balance: balance,
             type: type,
             accountNumber: accountNumber,
+            clientId: clientId,
           );
 
           final serverId = (res['id'] ?? res['walletId']) as int?;
@@ -128,6 +130,10 @@ class SyncService {
         'occurredAt': occurredAtUtc,
         'note': note,
       };
+
+      if (tx.containsKey('adjustmentDirection') && tx['adjustmentDirection'] != null) {
+        payload['adjustmentDirection'] = tx['adjustmentDirection'];
+      }
 
       if (serverWalletId != null && serverWalletId > 0) {
         payload['walletId'] = serverWalletId;

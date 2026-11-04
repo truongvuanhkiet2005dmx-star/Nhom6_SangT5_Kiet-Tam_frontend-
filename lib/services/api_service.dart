@@ -112,6 +112,13 @@ class ApiService {
       );
     }
 
+    if (statusCode == 409) {
+      throw ApiException(
+        'Không thể thực hiện thao tác do xung đột dữ liệu trên máy chủ.',
+        statusCode: 409,
+      );
+    }
+
     String errorMessage = 'Lỗi máy chủ ($statusCode)';
     if (parsedBody is Map) {
       if (parsedBody.containsKey('message') && parsedBody['message'] != null) {
@@ -131,14 +138,20 @@ class ApiService {
   // Health check
   Future<Map<String, dynamic>> healthCheck() async {
     final base = await baseUrl;
-    final uri = Uri.parse('$base/health');
-
     try {
-      final response = await _client.get(uri).timeout(const Duration(seconds: 5));
-      final data = _processResponse(response);
+      final uriApi = Uri.parse('$base/health');
+      final responseApi = await _client.get(uriApi).timeout(const Duration(seconds: 5));
+      final data = _processResponse(responseApi);
       return data is Map<String, dynamic> ? data : {};
-    } catch (e) {
-      return {'status': 'offline', 'error': e.toString()};
+    } catch (_) {
+      try {
+        final uriRoot = Uri.parse('${base.replaceAll('/api', '')}/health');
+        final responseRoot = await _client.get(uriRoot).timeout(const Duration(seconds: 5));
+        final dataRoot = _processResponse(responseRoot);
+        return dataRoot is Map<String, dynamic> ? dataRoot : {};
+      } catch (e) {
+        return {'status': 'offline', 'error': e.toString()};
+      }
     }
   }
 
@@ -163,7 +176,7 @@ class ApiService {
     required String displayName,
   }) async {
     final base = await baseUrl;
-    final uri = Uri.parse('$base/api/auth/register');
+    final uri = Uri.parse('$base/auth/register');
 
     try {
       final response = await _client
@@ -196,7 +209,7 @@ class ApiService {
     required String password,
   }) async {
     final base = await baseUrl;
-    final uri = Uri.parse('$base/api/auth/login');
+    final uri = Uri.parse('$base/auth/login');
 
     try {
       final response = await _client
@@ -225,7 +238,7 @@ class ApiService {
 
   Future<Map<String, dynamic>> loginWithGoogle({required String idToken}) async {
     final base = await baseUrl;
-    final uri = Uri.parse('$base/api/auth/google');
+    final uri = Uri.parse('$base/auth/google');
 
     try {
       final response = await _client
@@ -253,7 +266,7 @@ class ApiService {
 
   Future<Map<String, dynamic>> getProfile() async {
     final base = await baseUrl;
-    final uri = Uri.parse('$base/api/auth/me');
+    final uri = Uri.parse('$base/auth/me');
 
     try {
       final response = await _client
@@ -280,7 +293,7 @@ class ApiService {
   Future<void> registerDeviceToken(String token) async {
     if (token.isEmpty) return;
     final base = await baseUrl;
-    final uri = Uri.parse('$base/api/devices/token');
+    final uri = Uri.parse('$base/devices/token');
 
     try {
       final response = await _client
@@ -300,7 +313,7 @@ class ApiService {
   Future<void> deleteDeviceToken(String token) async {
     if (token.isEmpty) return;
     final base = await baseUrl;
-    final uri = Uri.parse('$base/api/devices/token');
+    final uri = Uri.parse('$base/devices/token');
 
     try {
       final response = await _client
@@ -320,7 +333,7 @@ class ApiService {
   // 3. Family Group Endpoints
   Future<List<dynamic>> getFamilies() async {
     final base = await baseUrl;
-    final uri = Uri.parse('$base/api/families');
+    final uri = Uri.parse('$base/families');
 
     try {
       final response = await _client
@@ -347,7 +360,7 @@ class ApiService {
     required String displayName,
   }) async {
     final base = await baseUrl;
-    final uri = Uri.parse('$base/api/families');
+    final uri = Uri.parse('$base/families');
 
     try {
       final response = await _client
@@ -375,7 +388,7 @@ class ApiService {
     required String relationship,
   }) async {
     final base = await baseUrl;
-    final uri = Uri.parse('$base/api/families/join');
+    final uri = Uri.parse('$base/families/join');
 
     try {
       final response = await _client
@@ -400,7 +413,7 @@ class ApiService {
 
   Future<void> leaveFamily(int familyGroupId) async {
     final base = await baseUrl;
-    final uri = Uri.parse('$base/api/families/$familyGroupId/leave');
+    final uri = Uri.parse('$base/families/$familyGroupId/leave');
 
     try {
       final response = await _client
@@ -419,7 +432,7 @@ class ApiService {
 
   Future<void> deleteFamily(int familyGroupId) async {
     final base = await baseUrl;
-    final uri = Uri.parse('$base/api/families/$familyGroupId');
+    final uri = Uri.parse('$base/families/$familyGroupId');
 
     try {
       final response = await _client
@@ -439,7 +452,7 @@ class ApiService {
   // 4. Wallet Endpoints
   Future<List<dynamic>> getWallets() async {
     final base = await baseUrl;
-    final uri = Uri.parse('$base/api/wallets');
+    final uri = Uri.parse('$base/wallets');
 
     try {
       final response = await _client
@@ -463,7 +476,7 @@ class ApiService {
 
   Future<Map<String, dynamic>> getWallet(int id) async {
     final base = await baseUrl;
-    final uri = Uri.parse('$base/api/wallets/$id');
+    final uri = Uri.parse('$base/wallets/$id');
 
     try {
       final response = await _client
@@ -486,15 +499,17 @@ class ApiService {
     required int balance,
     required String type,
     String? accountNumber,
+    String? clientId,
   }) async {
     final base = await baseUrl;
-    final uri = Uri.parse('$base/api/wallets');
+    final uri = Uri.parse('$base/wallets');
 
     final validParams = {
       'name': name,
       'initialBalance': balance,
       'balance': balance,
       'type': normalizeWalletType(type),
+      if (clientId != null && clientId.isNotEmpty) 'clientId': clientId,
     };
 
     try {
@@ -517,17 +532,14 @@ class ApiService {
   Future<Map<String, dynamic>> updateWallet(
     int id, {
     required String name,
-    required int balance,
     required String type,
     String? accountNumber,
   }) async {
     final base = await baseUrl;
-    final uri = Uri.parse('$base/api/wallets/$id');
+    final uri = Uri.parse('$base/wallets/$id');
 
     final validParams = {
       'name': name,
-      'initialBalance': balance,
-      'balance': balance,
       'type': normalizeWalletType(type),
     };
 
@@ -550,7 +562,7 @@ class ApiService {
 
   Future<void> deleteWallet(int id) async {
     final base = await baseUrl;
-    final uri = Uri.parse('$base/api/wallets/$id');
+    final uri = Uri.parse('$base/wallets/$id');
 
     try {
       final response = await _client
@@ -567,14 +579,14 @@ class ApiService {
     }
   }
 
-  // 5. Transaction Endpoints (`GET /api/transactions`, `POST /api/transactions`)
+  // 5. Transaction Endpoints
   Future<List<dynamic>> getTransactions({int? year, int? month}) async {
     final base = await baseUrl;
     final queryParams = <String, String>{};
     if (year != null) queryParams['year'] = year.toString();
     if (month != null) queryParams['month'] = month.toString();
 
-    final uri = Uri.parse('$base/api/transactions').replace(queryParameters: queryParams.isEmpty ? null : queryParams);
+    final uri = Uri.parse('$base/transactions').replace(queryParameters: queryParams.isEmpty ? null : queryParams);
 
     try {
       final response = await _client
@@ -586,8 +598,10 @@ class ApiService {
 
       final data = _processResponse(response);
       if (data is List) return data;
-      if (data is Map && data.containsKey('transactions') && data['transactions'] is List) {
-        return data['transactions'] as List;
+      if (data is Map) {
+        if (data.containsKey('data') && data['data'] is List) return data['data'] as List;
+        if (data.containsKey('items') && data['items'] is List) return data['items'] as List;
+        if (data.containsKey('transactions') && data['transactions'] is List) return data['transactions'] as List;
       }
       return [];
     } catch (e) {
@@ -598,7 +612,7 @@ class ApiService {
 
   Future<Map<String, dynamic>> createTransaction(Map<String, dynamic> payload) async {
     final base = await baseUrl;
-    final uri = Uri.parse('$base/api/transactions');
+    final uri = Uri.parse('$base/transactions');
 
     final dtoPayload = <String, dynamic>{
       'eventId': payload['eventId']?.toString() ?? '',
@@ -612,6 +626,9 @@ class ApiService {
       'note': payload['note']?.toString() ?? '',
     };
 
+    if (payload.containsKey('adjustmentDirection') && payload['adjustmentDirection'] != null) {
+      dtoPayload['adjustmentDirection'] = payload['adjustmentDirection'];
+    }
     if (payload.containsKey('walletId') && payload['walletId'] != null) {
       dtoPayload['walletId'] = payload['walletId'];
     }
@@ -641,7 +658,7 @@ class ApiService {
 
   Future<Map<String, dynamic>> updateTransaction(int id, Map<String, dynamic> payload) async {
     final base = await baseUrl;
-    final uri = Uri.parse('$base/api/transactions/$id');
+    final uri = Uri.parse('$base/transactions/$id');
 
     try {
       final response = await _client
@@ -662,7 +679,7 @@ class ApiService {
 
   Future<void> deleteTransaction(int id) async {
     final base = await baseUrl;
-    final uri = Uri.parse('$base/api/transactions/$id');
+    final uri = Uri.parse('$base/transactions/$id');
 
     try {
       final response = await _client
@@ -694,7 +711,7 @@ class ApiService {
       queryParams['familyGroupId'] = familyGroupId.toString();
     }
 
-    final uri = Uri.parse('$base/api/reports/monthly').replace(queryParameters: queryParams);
+    final uri = Uri.parse('$base/reports/monthly').replace(queryParameters: queryParams);
 
     try {
       final response = await _client
@@ -714,7 +731,7 @@ class ApiService {
 
   Future<Map<String, dynamic>> getBudget(int familyGroupId, {required int year, required int month}) async {
     final base = await baseUrl;
-    final uri = Uri.parse('$base/api/budgets/$familyGroupId').replace(queryParameters: {
+    final uri = Uri.parse('$base/budgets/$familyGroupId').replace(queryParameters: {
       'year': year.toString(),
       'month': month.toString(),
     });
@@ -742,7 +759,7 @@ class ApiService {
     required int monthlyLimit,
   }) async {
     final base = await baseUrl;
-    final uri = Uri.parse('$base/api/budgets/$familyGroupId');
+    final uri = Uri.parse('$base/budgets/$familyGroupId');
 
     try {
       final response = await _client

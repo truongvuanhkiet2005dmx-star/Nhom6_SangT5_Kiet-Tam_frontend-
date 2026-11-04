@@ -69,7 +69,6 @@ class _WalletsTabState extends State<WalletsTab> {
       _isLoading = false;
     });
 
-    // Đồng bộ ví chưa có serverId nếu đã kết nối backend
     unawaited(SyncService.instance.syncUnsyncedWallets(userId));
   }
 
@@ -428,21 +427,24 @@ class _AddWalletDialogState extends State<_AddWalletDialog> {
 
             if (name.isEmpty) return;
 
+            final newClientId = DatabaseHelper.instance.generateUuid();
+
             final localId = await DatabaseHelper.instance.insertWallet({
               'userId': widget.userId,
               'name': name,
               'balance': balance,
               'type': _type,
               'accountNumber': accNum.isEmpty ? null : accNum,
+              'clientId': newClientId,
             });
 
-            // Gửi API tạo ví trên server nếu đã có kết nối
             try {
               final res = await ApiService.instance.createWallet(
                 name: name,
                 balance: balance,
                 type: _type,
                 accountNumber: accNum.isEmpty ? null : accNum,
+                clientId: newClientId,
               );
               final serverId = (res['id'] ?? res['walletId']) as int?;
               if (serverId != null && serverId > 0) {
@@ -563,13 +565,24 @@ class _EditWalletDialogState extends State<_EditWalletDialog> {
       actions: [
         TextButton(
           onPressed: () async {
-            await DatabaseHelper.instance.deleteWallet(walletId);
             if (serverId != null && serverId > 0) {
               try {
                 await ApiService.instance.deleteWallet(serverId);
+                await DatabaseHelper.instance.deleteWallet(walletId);
               } catch (e) {
-                debugPrint("Delete wallet API error: $e");
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(e is ApiException && e.statusCode == 409
+                        ? 'Không thể xóa ví vì có giao dịch đang liên kết trên máy chủ.'
+                        : 'Không thể xóa ví: $e'),
+                    backgroundColor: Colors.red,
+                  ),
+                );
+                return;
               }
+            } else {
+              await DatabaseHelper.instance.deleteWallet(walletId);
             }
             if (!mounted) return;
             Navigator.pop(context, true);
@@ -598,7 +611,6 @@ class _EditWalletDialogState extends State<_EditWalletDialog> {
                 await ApiService.instance.updateWallet(
                   serverId,
                   name: name,
-                  balance: newBalance,
                   type: _type,
                   accountNumber: accNum.isEmpty ? null : accNum,
                 );
@@ -610,6 +622,7 @@ class _EditWalletDialogState extends State<_EditWalletDialog> {
             final diff = newBalance - oldBalance;
             if (diff != 0 && userId != null) {
               final adjEventId = DatabaseHelper.instance.generateUuid();
+              final direction = diff > 0 ? 'increase' : 'decrease';
               final adjTxId = await DatabaseHelper.instance.insertTransaction({
                 'userId': userId,
                 'walletId': walletId,
@@ -629,6 +642,7 @@ class _EditWalletDialogState extends State<_EditWalletDialog> {
                 'eventId': adjEventId,
                 'amount': diff.abs(),
                 'type': 'adjustment',
+                'adjustmentDirection': direction,
                 'walletId': walletId,
                 'walletName': name,
                 'bankName': name,

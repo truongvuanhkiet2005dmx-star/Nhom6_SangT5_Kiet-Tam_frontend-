@@ -31,7 +31,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 8,
+      version: 9,
       onCreate: _createDB,
       onUpgrade: _onUpgrade,
     );
@@ -100,6 +100,7 @@ class DatabaseHelper {
       CREATE TABLE wallets (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         serverId INTEGER,
+        clientId TEXT,
         userId INTEGER NOT NULL,
         name TEXT NOT NULL,
         balance INTEGER NOT NULL DEFAULT 0,
@@ -107,6 +108,10 @@ class DatabaseHelper {
         accountNumber TEXT,
         FOREIGN KEY (userId) REFERENCES users(id)
       )
+    ''');
+
+    await db.execute('''
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_wallets_user_clientId ON wallets(userId, clientId) WHERE clientId IS NOT NULL;
     ''');
 
     await db.execute('''
@@ -309,6 +314,38 @@ class DatabaseHelper {
         debugPrint("[DatabaseHelper] Migration v8 warning: $e");
       }
     }
+
+    if (oldVersion < 9) {
+      try {
+        await db.execute('''
+          ALTER TABLE wallets
+          ADD COLUMN clientId TEXT
+        ''');
+      } catch (_) {}
+
+      try {
+        final walletsWithoutClientId = await db.query(
+          'wallets',
+          where: "clientId IS NULL OR clientId = ''",
+        );
+        for (final row in walletsWithoutClientId) {
+          final id = row['id'] as int;
+          final newClientId = generateUuid();
+          await db.update(
+            'wallets',
+            {'clientId': newClientId},
+            where: 'id = ?',
+            whereArgs: [id],
+          );
+        }
+
+        await db.execute('''
+          CREATE UNIQUE INDEX IF NOT EXISTS idx_wallets_user_clientId ON wallets(userId, clientId) WHERE clientId IS NOT NULL
+        ''');
+      } catch (e) {
+        debugPrint("[DatabaseHelper] Migration v9 warning: $e");
+      }
+    }
   }
 
   Future<int> registerUser(
@@ -335,6 +372,7 @@ class DatabaseHelper {
       'balance': 0,
       'type': 'cash',
       'accountNumber': '',
+      'clientId': generateUuid(),
     });
 
     return userId;
@@ -446,6 +484,7 @@ class DatabaseHelper {
           'balance': 0,
           'type': 'bank',
           'accountNumber': '',
+          'clientId': generateUuid(),
         });
       }
     }
@@ -458,6 +497,7 @@ class DatabaseHelper {
         'balance': 0,
         'type': 'bank',
         'accountNumber': '',
+        'clientId': generateUuid(),
       });
     }
 
@@ -489,10 +529,15 @@ class DatabaseHelper {
       Map<String, dynamic> wallet,
       ) async {
     final db = await instance.database;
+    final walletMap = Map<String, dynamic>.from(wallet);
+
+    if (walletMap['clientId'] == null || walletMap['clientId'].toString().isEmpty) {
+      walletMap['clientId'] = generateUuid();
+    }
 
     return await db.insert(
       'wallets',
-      wallet,
+      walletMap,
     );
   }
 
@@ -838,6 +883,7 @@ class DatabaseHelper {
   Future<int> upsertWalletFromBackend(int localUserId, Map<String, dynamic> remoteWallet) async {
     final db = await instance.database;
     final serverId = (remoteWallet['id'] ?? remoteWallet['walletId']) as int?;
+    final clientId = remoteWallet['clientId']?.toString();
     final name = remoteWallet['name']?.toString() ?? 'Ví';
     final balance = (remoteWallet['currentBalance'] ?? remoteWallet['balance'] ?? remoteWallet['initialBalance'] as num?)?.toInt() ?? 0;
     final type = remoteWallet['type']?.toString() ?? 'bank';
@@ -855,6 +901,32 @@ class DatabaseHelper {
         await db.update(
           'wallets',
           {
+            'name': name,
+            'balance': balance,
+            'type': type,
+            if (clientId != null && clientId.isNotEmpty) 'clientId': clientId,
+          },
+          where: 'id = ?',
+          whereArgs: [localId],
+        );
+        return localId;
+      }
+    }
+
+    if (clientId != null && clientId.isNotEmpty) {
+      final existingByClientId = await db.query(
+        'wallets',
+        where: 'clientId = ? AND userId = ?',
+        whereArgs: [clientId, localUserId],
+        limit: 1,
+      );
+
+      if (existingByClientId.isNotEmpty) {
+        final localId = existingByClientId.first['id'] as int;
+        await db.update(
+          'wallets',
+          {
+            'serverId': serverId,
             'name': name,
             'balance': balance,
             'type': type,
@@ -881,6 +953,7 @@ class DatabaseHelper {
           'serverId': serverId,
           'balance': balance,
           'type': type,
+          if (clientId != null && clientId.isNotEmpty) 'clientId': clientId,
         },
         where: 'id = ?',
         whereArgs: [localId],
@@ -890,6 +963,7 @@ class DatabaseHelper {
 
     return await db.insert('wallets', {
       'serverId': serverId,
+      'clientId': clientId ?? generateUuid(),
       'userId': localUserId,
       'name': name,
       'balance': balance,
