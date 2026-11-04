@@ -194,27 +194,37 @@ class BankMessageParser {
     if (amount < 1000) return null;
 
     bool isIncome = rawAmountStr.contains('+') ||
-        lower.contains('giao dịch +') ||
         lower.contains('gd: +') ||
         lower.contains('gd:+') ||
+        lower.contains('ps: +') ||
         lower.contains('ps:+') ||
         lower.contains('cộng') ||
         lower.contains('nhận');
 
     bool isExpense = rawAmountStr.contains('-') ||
+        lower.contains('gd: -') ||
+        lower.contains('gd:-') ||
+        lower.contains('ps: -') ||
+        lower.contains('ps:-') ||
         lower.contains('trừ') ||
         lower.contains('thanh toan') ||
         lower.contains('thanh toán') ||
-        lower.contains('chi') ||
         lower.contains('rut tien') ||
         lower.contains('rút tiền');
 
-    if (!isIncome && !isExpense) {
-      debugPrint("[BankMessageParser] Bỏ qua vì không xác định được chiều giao dịch (thu/chi): $content");
-      return null;
+    // Strict Priority: Explicit '+' or '-' in rawAmountStr or GD/PS strictly overrides text keywords!
+    bool finalIsExpense;
+    if (rawAmountStr.contains('+') || lower.contains('gd:+') || lower.contains('gd: +') || lower.contains('ps:+') || lower.contains('ps: +')) {
+      finalIsExpense = false; // Explicit plus ALWAYS means Income
+    } else if (rawAmountStr.contains('-') || lower.contains('gd:-') || lower.contains('gd: -') || lower.contains('ps:-') || lower.contains('ps: -')) {
+      finalIsExpense = true; // Explicit minus ALWAYS means Expense
+    } else {
+      if (!isIncome && !isExpense) {
+        debugPrint("[BankMessageParser] Bỏ qua vì không xác định được chiều giao dịch (thu/chi): $content");
+        return null;
+      }
+      finalIsExpense = isExpense && !isIncome;
     }
-
-    final finalIsExpense = isExpense && !isIncome;
 
     String? refId;
     final refMatch = RegExp(r'(?:REQ_ID|Ref|Mã\s*GD|Ma\s*GD|RefNo|TraceNo)\s*[:=]?\s*([A-Za-z0-9_.-]{6,32})', caseSensitive: false).firstMatch(content);

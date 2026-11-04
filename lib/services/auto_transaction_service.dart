@@ -295,24 +295,12 @@ class AutoTransactionService {
     final extractedStk = parsed.accountNumber;
     final refId = parsed.refId;
 
-    // Stable Dedup Key Check in SQLite before transaction creation
+    // Stable Dedup Key based strictly on transaction reference or normalized message hash
     final now = DateTime.now();
-    final minuteStr = "${now.year}${now.month}${now.day}${now.hour}${now.minute}";
+    final rawHash = rawContent.trim().replaceAll(RegExp(r'\s+'), ' ').hashCode.abs();
     final dedupKey = (refId != null && refId.isNotEmpty)
         ? "REF_$refId"
-        : "HASH_${detectedBankName}_${extractedStk ?? ''}_${amount}_${isExpense}_$minuteStr";
-
-    final existingDedupTx = await db.query(
-      'transactions',
-      where: 'userId = ? AND note LIKE ?',
-      whereArgs: [activeUserId, '%$dedupKey%'],
-      limit: 1,
-    );
-
-    if (existingDedupTx.isNotEmpty) {
-      debugPrint("[AutoTransactionService] Bỏ qua vì phát hiện giao dịch trùng lặp trong SQLite: $dedupKey");
-      return;
-    }
+        : "HASH_${detectedBankName}_${extractedStk ?? ''}_${amount}_${isExpense}_$rawHash";
 
     List<Map<String, dynamic>> wallets = await DatabaseHelper.instance.getWallets(activeUserId);
     Map<String, dynamic>? matchedWallet = findMatchingWallet(wallets, rawContent, extractedStk);
@@ -396,7 +384,21 @@ class AutoTransactionService {
         ? parsedAccountBalance
         : (isNewWallet ? (isExpense ? 0 : amount) : expectedBalanceAfterTx);
 
+    bool isDuplicate = false;
     await db.transaction((txn) async {
+      final dupCheck = await txn.query(
+        'transactions',
+        where: 'userId = ? AND note LIKE ?',
+        whereArgs: [activeUserId, '%$dedupKey%'],
+        limit: 1,
+      );
+
+      if (dupCheck.isNotEmpty) {
+        isDuplicate = true;
+        debugPrint("[AutoTransactionService] Bỏ qua vì phát hiện giao dịch trùng lặp trong SQLite: $dedupKey");
+        return;
+      }
+
       if (adjustmentDelta != null && adjustmentDelta != 0) {
         final adjEventId = DatabaseHelper.instance.generateUuid();
         final isAdjDecrease = adjustmentDelta < 0;
@@ -446,6 +448,8 @@ class AutoTransactionService {
       );
     });
 
+    if (isDuplicate) return;
+
     onTransactionAdded.add(true);
 
     try {
@@ -459,28 +463,31 @@ class AutoTransactionService {
       debugPrint("Notification error in background: $e");
     }
 
-    try {
-      await SyncService.instance.syncUnsyncedWallets(walletUserId);
-      final freshWallet = await DatabaseHelper.instance.getWalletById(walletId);
-      final serverWalletId = (freshWallet != null ? freshWallet['serverId'] : null) as int?;
+    // Unawaited background network sync so notification listener completes in < 10ms
+    unawaited(Future.microtask(() async {
+      try {
+        await SyncService.instance.syncUnsyncedWallets(walletUserId);
+        final freshWallet = await DatabaseHelper.instance.getWalletById(walletId);
+        final serverWalletId = (freshWallet != null ? freshWallet['serverId'] : null) as int?;
 
-      final txData = {
-        'id': insertedTxId,
-        'eventId': generatedEventId,
-        'amount': amount,
-        'type': isExpense ? 'expense' : 'income',
-        'walletId': serverWalletId ?? walletId,
-        'walletName': walletName,
-        'bankName': walletName,
-        'packageName': packageName,
-        'categoryName': isExpense ? 'Hóa đơn' : 'Tiền lương',
-        'date': DateTime.now().toIso8601String(),
-        'note': 'Auto [$dedupKey]: $displayNote',
-      };
-      await SyncService.instance.syncTransaction(txData);
-    } catch (e) {
-      debugPrint("Auto background sync error: $e");
-    }
+        final txData = {
+          'id': insertedTxId,
+          'eventId': generatedEventId,
+          'amount': amount,
+          'type': isExpense ? 'expense' : 'income',
+          'walletId': serverWalletId ?? walletId,
+          'walletName': walletName,
+          'bankName': walletName,
+          'packageName': packageName,
+          'categoryName': isExpense ? 'Hóa đơn' : 'Tiền lương',
+          'date': DateTime.now().toIso8601String(),
+          'note': 'Auto [$dedupKey]: $displayNote',
+        };
+        await SyncService.instance.syncTransaction(txData);
+      } catch (e) {
+        debugPrint("Auto background sync error: $e");
+      }
+    }));
   }
 
   static String _formatMoney(int amount) {

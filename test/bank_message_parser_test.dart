@@ -71,7 +71,7 @@ void main() {
       expect(result, isNull);
     });
 
-    test('6. VietinBank Multiline Income Pattern', () {
+    test('6. VietinBank Multiline Income Pattern with "rút tiền" in Note', () {
       const sample = '''VietinBank:04/11/2026 23:10
 TK:104880072280
 GD:+10,000 VND
@@ -145,6 +145,32 @@ ND:thanh toán mua sắm, REQ_ID 155158452425''';
 
       expect(expectedPostTxBal, equals(125000));
       expect(delta, equals(-5000));
+    });
+
+    test('11. Same Message Arriving via SMS and Notification generates identical Ref ID & Dedup Key', () {
+      const smsContent = '''VietinBank:04/11/2026 23:10
+TK:104880072280
+GD:+10,000 VND
+SDC:145,000 VND
+ND:rút tiền về tài khoản, REQ_ID 155158452424''';
+
+      const notificationContent = '''VietinBank:04/11/2026 23:10
+TK:104880072280
+GD:+10,000 VND
+SDC:145,000 VND
+ND:rút tiền về tài khoản, REQ_ID 155158452424''';
+
+      final smsParsed = BankMessageParser.parse(smsContent);
+      final notifParsed = BankMessageParser.parse(notificationContent);
+
+      expect(smsParsed, isNotNull);
+      expect(notifParsed, isNotNull);
+
+      expect(smsParsed!.refId, equals('155158452424'));
+      expect(notifParsed!.refId, equals('155158452424'));
+      expect(smsParsed.refId, equals(notifParsed.refId));
+      expect(smsParsed.isExpense, isFalse);
+      expect(notifParsed.isExpense, isFalse);
     });
   });
 }
