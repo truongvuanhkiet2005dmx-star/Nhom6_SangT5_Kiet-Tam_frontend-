@@ -349,7 +349,7 @@ class ApiService {
   }
 
   Future<Map<String, dynamic>> changePassword({
-    required String currentPassword,
+    String? currentPassword,
     required String newPassword,
   }) async {
     final base = await baseUrl;
@@ -361,7 +361,7 @@ class ApiService {
             uri,
             headers: await _headers(withAuth: true),
             body: jsonEncode({
-              'currentPassword': currentPassword,
+              'currentPassword': currentPassword ?? '',
               'newPassword': newPassword,
             }),
           )
@@ -377,7 +377,7 @@ class ApiService {
     }
   }
 
-  Future<void> deleteAccount({required String password}) async {
+  Future<void> deleteAccount({String? password}) async {
     final base = await baseUrl;
     final uri = Uri.parse('$base/auth/account');
 
@@ -387,7 +387,7 @@ class ApiService {
             uri,
             headers: await _headers(withAuth: true),
             body: jsonEncode({
-              'password': password,
+              'password': password ?? '',
             }),
           )
           .timeout(const Duration(seconds: 15));
@@ -567,7 +567,7 @@ class ApiService {
     }
   }
 
-  Future<void> deleteFamilyMember(int familyGroupId, int memberUserId) async {
+  Future<void> deleteFamilyMember(int familyGroupId, String memberUserId) async {
     final base = await baseUrl;
     final uri = Uri.parse('$base/families/$familyGroupId/members/$memberUserId');
 

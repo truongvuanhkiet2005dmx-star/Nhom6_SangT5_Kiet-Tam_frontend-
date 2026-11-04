@@ -202,6 +202,21 @@ class SyncService {
         debugPrint("[SyncService] Lỗi kéo danh sách ví từ backend: $e");
       }
 
+      // Kiểm tra nếu tài khoản hoàn toàn chưa có ví cả trên server lẫn local -> tạo ví mặc định
+      final localWallets = await DatabaseHelper.instance.getWallets(userId);
+      if (localWallets.isEmpty) {
+        final newClientId = DatabaseHelper.instance.generateUuid();
+        await DatabaseHelper.instance.insertWallet({
+          'userId': userId,
+          'name': 'Ví tiền mặt',
+          'balance': 0,
+          'initialBalance': 0,
+          'type': 'cash',
+          'accountNumber': '',
+          'clientId': newClientId,
+        });
+      }
+
       // 2. Đồng bộ ví local chưa có serverId
       await syncUnsyncedWallets(userId);
 

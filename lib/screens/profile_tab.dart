@@ -172,7 +172,7 @@ class _ProfileTabState extends State<ProfileTab> {
       builder: (context) {
         return AlertDialog(
           backgroundColor: AppColors.card,
-          title: const Text('Đổi mật khẩu', style: TextStyle(color: AppColors.textDark, fontWeight: FontWeight.bold)),
+          title: const Text('Đổi / Tạo mật khẩu', style: TextStyle(color: AppColors.textDark, fontWeight: FontWeight.bold)),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -181,8 +181,8 @@ class _ProfileTabState extends State<ProfileTab> {
                 obscureText: true,
                 style: const TextStyle(color: AppColors.textDark),
                 decoration: const InputDecoration(
-                  labelText: 'Mật khẩu hiện tại',
-                  labelStyle: TextStyle(color: AppColors.textSub),
+                  labelText: 'Mật khẩu hiện tại (bỏ trống nếu tài khoản OTP)',
+                  labelStyle: TextStyle(color: AppColors.textSub, fontSize: 12),
                 ),
               ),
               const SizedBox(height: 12),
@@ -219,9 +219,9 @@ class _ProfileTabState extends State<ProfileTab> {
                 final next = newPassController.text;
                 final conf = confirmPassController.text;
 
-                if (curr.isEmpty || next.isEmpty) {
+                if (next.isEmpty) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Vui lòng nhập đầy đủ thông tin!'), backgroundColor: Colors.orange),
+                    const SnackBar(content: Text('Vui lòng nhập mật khẩu mới!'), backgroundColor: Colors.orange),
                   );
                   return;
                 }
@@ -241,7 +241,7 @@ class _ProfileTabState extends State<ProfileTab> {
                   if (!mounted) return;
                   Navigator.pop(context);
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Đổi mật khẩu thành công!'), backgroundColor: Colors.green),
+                    const SnackBar(content: Text('Đổi / Tạo mật khẩu thành công!'), backgroundColor: Colors.green),
                   );
                 } catch (e) {
                   if (!mounted) return;
@@ -273,7 +273,7 @@ class _ProfileTabState extends State<ProfileTab> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text(
-                'CẢNH BÁO: Thao tác này sẽ xóa vĩnh viễn tài khoản của bạn trên hệ thống. Dữ liệu local của bạn sẽ bị xóa sạch.',
+                'CẢNH BÁO: Thao tác này sẽ xóa vĩnh viễn tài khoản của bạn trên hệ thống. Dữ liệu local thuộc tài khoản này sẽ bị xóa.',
                 style: TextStyle(color: AppColors.textSub, fontSize: 13),
               ),
               const SizedBox(height: 16),
@@ -282,8 +282,8 @@ class _ProfileTabState extends State<ProfileTab> {
                 obscureText: true,
                 style: const TextStyle(color: AppColors.textDark),
                 decoration: const InputDecoration(
-                  labelText: 'Nhập mật khẩu để xác nhận',
-                  labelStyle: TextStyle(color: AppColors.textSub),
+                  labelText: 'Mật khẩu (bỏ trống nếu tài khoản OTP)',
+                  labelStyle: TextStyle(color: AppColors.textSub, fontSize: 12),
                   border: OutlineInputBorder(),
                 ),
               ),
@@ -298,12 +298,6 @@ class _ProfileTabState extends State<ProfileTab> {
               style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
               onPressed: () async {
                 final password = passwordController.text;
-                if (password.isEmpty) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Vui lòng nhập mật khẩu!'), backgroundColor: Colors.orange),
-                  );
-                  return;
-                }
 
                 try {
                   await ApiService.instance.deleteAccount(password: password);
@@ -320,7 +314,11 @@ class _ProfileTabState extends State<ProfileTab> {
                   }
 
                   await ApiService.instance.clearToken();
-                  await prefs.clear();
+                  await prefs.remove('isLoggedIn');
+                  await prefs.remove('userId');
+                  await prefs.remove('username');
+                  await prefs.remove('activeFamilyGroupId');
+                  await prefs.remove('displayName');
 
                   if (!mounted) return;
                   Navigator.pop(context);
@@ -585,7 +583,7 @@ class _ProfileTabState extends State<ProfileTab> {
               _buildMenuCard([
                 _buildMenuItem(
                   icon: Icons.lock_reset_outlined,
-                  title: 'Đổi mật khẩu',
+                  title: 'Đổi / Tạo mật khẩu',
                   color: Colors.indigoAccent,
                   onTap: _showChangePasswordDialog,
                 ),
@@ -814,11 +812,24 @@ class _FamilyWalletModalState extends State<_FamilyWalletModal> {
   bool _isSubmitting = false;
   List<dynamic> _families = [];
   int? _activeFamilyGroupId;
+  String? _myUserId;
 
   @override
   void initState() {
     super.initState();
     _loadFamilyData();
+  }
+
+  bool _isOwnerOf(dynamic f) {
+    if (f is! Map) return false;
+    if (f['isOwner'] == true) return true;
+    final members = f['members'];
+    if (members is! List || _myUserId == null) return false;
+    return members.any((m) =>
+      m is Map &&
+      m['userId']?.toString() == _myUserId &&
+      m['accessRole']?.toString().toLowerCase() == 'owner'
+    );
   }
 
   Future<void> _loadFamilyData() async {
@@ -829,6 +840,13 @@ class _FamilyWalletModalState extends State<_FamilyWalletModal> {
     try {
       final token = await ApiService.instance.getToken();
       if (token != null && token.isNotEmpty) {
+        try {
+          final profile = await ApiService.instance.getProfile();
+          if (profile.containsKey('id')) {
+            _myUserId = profile['id']?.toString();
+          }
+        } catch (_) {}
+
         final list = await ApiService.instance.getFamilies();
         _families = list;
 
@@ -948,7 +966,7 @@ class _FamilyWalletModalState extends State<_FamilyWalletModal> {
     }
   }
 
-  Future<void> _deleteMember(int familyId, int memberUserId, String memberName) async {
+  Future<void> _deleteMember(int familyId, String memberUserId, String memberName) async {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -1113,7 +1131,7 @@ class _FamilyWalletModalState extends State<_FamilyWalletModal> {
                     final fId = (f['id'] ?? f['familyGroupId']) as int?;
                     final fName = f['name']?.toString() ?? 'Nhóm gia đình';
                     final isSelected = fId == _activeFamilyGroupId;
-                    final isOwner = f['isOwner'] == true || f['role']?.toString().toLowerCase() == 'owner';
+                    final isOwner = _isOwnerOf(f);
                     final members = f['members'] is List ? f['members'] as List : [];
 
                     return Card(
@@ -1172,7 +1190,7 @@ class _FamilyWalletModalState extends State<_FamilyWalletModal> {
                                   const SizedBox(height: 4),
                                   ...members.map((m) {
                                     if (m is! Map) return const SizedBox();
-                                    final mUserId = (m['userId'] ?? m['id']) as int?;
+                                    final mUserId = m['userId']?.toString() ?? m['id']?.toString();
                                     final mName = m['displayName']?.toString() ?? m['username']?.toString() ?? 'Thành viên';
                                     final mRole = m['accessRole']?.toString() ?? m['role']?.toString() ?? '';
                                     final mIsOwner = mRole.toLowerCase() == 'owner';
@@ -1197,7 +1215,7 @@ class _FamilyWalletModalState extends State<_FamilyWalletModal> {
                                               ),
                                             ),
                                           ),
-                                          if (isOwner && !mIsOwner && fId != null && mUserId != null)
+                                          if (isOwner && !mIsOwner && fId != null && mUserId != null && mUserId.isNotEmpty)
                                             IconButton(
                                               icon: const Icon(Icons.remove_circle_outline, color: Colors.redAccent, size: 18),
                                               tooltip: 'Xóa khỏi nhóm',
@@ -1233,27 +1251,44 @@ class _FamilyWalletModalState extends State<_FamilyWalletModal> {
               if (_activeFamilyGroupId != null && _activeFamilyGroupId! > 0) ...[
                 const Text('Hạn mức Ngân sách Nhóm Tháng này:', style: TextStyle(color: AppColors.textDark, fontWeight: FontWeight.bold, fontSize: 14)),
                 const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _budgetController,
-                        keyboardType: TextInputType.number,
-                        style: const TextStyle(color: AppColors.textDark),
-                        decoration: const InputDecoration(
-                          hintText: 'Nhập hạn mức VNĐ (Ví dụ: 5000000)',
-                          hintStyle: TextStyle(color: AppColors.textSub),
-                          border: OutlineInputBorder(),
+                Builder(
+                  builder: (context) {
+                    final activeGroup = _families.firstWhere(
+                      (f) => (f['id'] ?? f['familyGroupId']) == _activeFamilyGroupId,
+                      orElse: () => null,
+                    );
+                    final isActiveOwner = activeGroup != null && _isOwnerOf(activeGroup);
+
+                    if (!isActiveOwner) {
+                      return const Text(
+                        'Chỉ chủ nhóm mới đặt được hạn mức.',
+                        style: TextStyle(color: AppColors.textSub, fontSize: 12, fontStyle: FontStyle.italic),
+                      );
+                    }
+
+                    return Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: _budgetController,
+                            keyboardType: TextInputType.number,
+                            style: const TextStyle(color: AppColors.textDark),
+                            decoration: const InputDecoration(
+                              hintText: 'Nhập hạn mức VNĐ (Ví dụ: 5000000)',
+                              hintStyle: TextStyle(color: AppColors.textSub),
+                              border: OutlineInputBorder(),
+                            ),
+                          ),
                         ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    ElevatedButton(
-                      style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
-                      onPressed: _isSubmitting ? null : _saveBudget,
-                      child: const Text('Lưu Hạn Mức', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
-                    ),
-                  ],
+                        const SizedBox(width: 8),
+                        ElevatedButton(
+                          style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
+                          onPressed: _isSubmitting ? null : _saveBudget,
+                          child: const Text('Lưu Hạn Mức', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+                        ),
+                      ],
+                    );
+                  },
                 ),
                 const Divider(height: 32, color: AppColors.border),
               ],

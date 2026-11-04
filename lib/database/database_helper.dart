@@ -554,30 +554,7 @@ class DatabaseHelper {
           'password': null,
           'salt': null,
         });
-
-        await db.insert('wallets', {
-          'userId': userId,
-          'name': 'Ví VietinBank',
-          'balance': 0,
-          'initialBalance': 0,
-          'type': 'bank',
-          'accountNumber': '',
-          'clientId': generateUuid(),
-        });
       }
-    }
-
-    final userWallets = await getWallets(userId);
-    if (userWallets.isEmpty) {
-      await db.insert('wallets', {
-        'userId': userId,
-        'name': 'Ví VietinBank',
-        'balance': 0,
-        'initialBalance': 0,
-        'type': 'bank',
-        'accountNumber': '',
-        'clientId': generateUuid(),
-      });
     }
 
     return {
@@ -610,16 +587,6 @@ class DatabaseHelper {
         'firebaseUid': null,
         'password': null,
         'salt': null,
-      });
-
-      await db.insert('wallets', {
-        'userId': userId,
-        'name': 'Ví VietinBank',
-        'balance': 0,
-        'initialBalance': 0,
-        'type': 'bank',
-        'accountNumber': '',
-        'clientId': generateUuid(),
       });
     }
 
