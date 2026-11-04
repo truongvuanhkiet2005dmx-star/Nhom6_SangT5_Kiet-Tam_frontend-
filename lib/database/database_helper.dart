@@ -26,15 +26,19 @@ class DatabaseHelper {
   }
 
   Future<Database> _initDB(String filePath) async {
+    final sw = Stopwatch()..start();
     final dbPath = await getDatabasesPath();
     final path = join(dbPath, filePath);
 
-    return await openDatabase(
+    final db = await openDatabase(
       path,
       version: 12,
       onCreate: _createDB,
       onUpgrade: _onUpgrade,
     );
+    sw.stop();
+    debugPrint("[Performance] DatabaseHelper._initDB completed in ${sw.elapsedMilliseconds}ms");
+    return db;
   }
 
   String generateRandomSalt([int length = 16]) {
@@ -362,44 +366,55 @@ class DatabaseHelper {
     }
 
     if (oldVersion < 11) {
+      final swV11 = Stopwatch()..start();
       try {
         await db.execute('''
           ALTER TABLE wallets
           ADD COLUMN initialBalance INTEGER NOT NULL DEFAULT 0
         ''');
 
+        final sourceEffects = await db.rawQuery('''
+          SELECT walletId AS wId,
+                 SUM(CASE
+                       WHEN type = 'income' THEN ABS(amount)
+                       WHEN type = 'expense' THEN -ABS(amount)
+                       WHEN type = 'transfer' THEN -ABS(amount)
+                       WHEN type = 'adjustment' AND (adjustmentDirection = 'increase' OR isExpense = 0) THEN ABS(amount)
+                       WHEN type = 'adjustment' THEN -ABS(amount)
+                       ELSE 0
+                     END) AS effect
+          FROM transactions
+          WHERE walletId IS NOT NULL
+          GROUP BY walletId
+        ''');
+
+        final targetEffects = await db.rawQuery('''
+          SELECT toWalletId AS wId,
+                 SUM(ABS(amount)) AS effect
+          FROM transactions
+          WHERE type = 'transfer' AND toWalletId IS NOT NULL
+          GROUP BY toWalletId
+        ''');
+
+        final Map<int, int> walletEffects = {};
+        for (var row in sourceEffects) {
+          final wId = row['wId'] as int?;
+          final effect = (row['effect'] as num?)?.toInt() ?? 0;
+          if (wId != null) walletEffects[wId] = (walletEffects[wId] ?? 0) + effect;
+        }
+        for (var row in targetEffects) {
+          final wId = row['wId'] as int?;
+          final effect = (row['effect'] as num?)?.toInt() ?? 0;
+          if (wId != null) walletEffects[wId] = (walletEffects[wId] ?? 0) + effect;
+        }
+
         final allWallets = await db.query('wallets');
         for (final wallet in allWallets) {
           final wId = wallet['id'] as int;
           final curBal = (wallet['balance'] as num?)?.toInt() ?? 0;
-
-          final txs = await db.query('transactions', where: 'walletId = ? OR toWalletId = ?', whereArgs: [wId, wId]);
-          int totalEffect = 0;
-          for (final tx in txs) {
-            final amt = (tx['amount'] as num?)?.toInt().abs() ?? 0;
-            final type = tx['type']?.toString();
-            final adjDir = tx['adjustmentDirection']?.toString();
-            final isExpense = tx['isExpense'] == 1;
-            final isWalletSource = tx['walletId'] == wId;
-            final isWalletTarget = tx['toWalletId'] == wId;
-
-            if (type == 'income') {
-              totalEffect += amt;
-            } else if (type == 'expense') {
-              totalEffect -= amt;
-            } else if (type == 'transfer') {
-              if (isWalletSource) totalEffect -= amt;
-              if (isWalletTarget) totalEffect += amt;
-            } else if (type == 'adjustment') {
-              if (adjDir == 'increase' || (!isExpense)) {
-                totalEffect += amt;
-              } else {
-                totalEffect -= amt;
-              }
-            }
-          }
-
+          final totalEffect = walletEffects[wId] ?? 0;
           final calculatedInitial = curBal - totalEffect;
+
           await db.update(
             'wallets',
             {'initialBalance': calculatedInitial},
@@ -410,6 +425,8 @@ class DatabaseHelper {
       } catch (e) {
         debugPrint("[DatabaseHelper] Migration v11 warning: $e");
       }
+      swV11.stop();
+      debugPrint("[Performance] DatabaseHelper Migration v11 completed in ${swV11.elapsedMilliseconds}ms");
     }
 
     if (oldVersion < 12) {

@@ -429,6 +429,11 @@ class ApiService {
   // 2. Device Notification Tokens
   Future<void> registerDeviceToken(String token) async {
     if (token.isEmpty) return;
+    final jwtToken = await getToken();
+    if (jwtToken == null || jwtToken.isEmpty) {
+      debugPrint('[ApiService] Chưa đăng nhập JWT. Bỏ qua gửi device token.');
+      return;
+    }
     final base = await baseUrl;
     final uri = Uri.parse('$base/devices/token');
 
@@ -439,7 +444,7 @@ class ApiService {
             headers: await _headers(withAuth: true),
             body: jsonEncode({'token': token}),
           )
-          .timeout(const Duration(seconds: 10));
+          .timeout(const Duration(seconds: 3));
 
       _processResponse(response);
     } catch (e) {

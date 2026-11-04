@@ -5,7 +5,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../core/app_colors.dart';
 import '../database/database_helper.dart';
 import '../services/auto_transaction_service.dart';
-import '../services/sync_service.dart';
 import '../services/native_listener_bridge.dart';
 import 'welcome_setup_screen.dart';
 import 'sms_list_screen.dart';
@@ -61,6 +60,7 @@ class _HomeTabState extends State<HomeTab> with WidgetsBindingObserver {
   }
 
   Future<void> _loadHomeData() async {
+    final sw = Stopwatch()..start();
     _lastLoadTime = DateTime.now();
 
     setState(() {
@@ -122,7 +122,8 @@ class _HomeTabState extends State<HomeTab> with WidgetsBindingObserver {
       _isLoading = false;
     });
 
-    unawaited(SyncService.instance.syncAllPendingTransactions(userId));
+    sw.stop();
+    debugPrint("[Performance] HomeTab._loadHomeData completed in ${sw.elapsedMilliseconds}ms");
   }
 
   Widget _buildNotificationPermissionBanner() {

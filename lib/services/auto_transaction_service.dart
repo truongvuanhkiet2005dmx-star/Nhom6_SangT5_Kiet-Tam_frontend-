@@ -225,6 +225,7 @@ class AutoTransactionService {
   }
 
   Future<bool> processSmsContent(String content, {bool force = false, String packageName = ''}) async {
+    final sw = Stopwatch()..start();
     if (!force && (content.contains('SmartMoney') || content.contains('Chi tiêu tự động') || content.contains('Thu nhập tự động'))) {
       return false;
     }
@@ -254,6 +255,8 @@ class AutoTransactionService {
     }
 
     await _saveParsedTransaction(parsed, rawContent: content, packageName: packageName);
+    sw.stop();
+    debugPrint("[Performance] AutoTransactionService.processSmsContent completed in ${sw.elapsedMilliseconds}ms");
     return true;
   }
 

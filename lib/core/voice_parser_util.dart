@@ -78,12 +78,16 @@ class VoiceParserUtil {
       }
     }
 
-    // 7. Raw digits e.g. "50000"
+    // 7. Formatted digits or raw digits e.g. "20.000" or "1,500,000" or "50000"
     if (amount == 0) {
-      final digitRegex = RegExp(r'(\d{4,12})');
-      final digitMatch = digitRegex.firstMatch(lower);
-      if (digitMatch != null) {
-        amount = int.tryParse(digitMatch.group(1)!) ?? 0;
+      final formattedDigitRegex = RegExp(r'\b(\d{1,3}(?:[.,]\d{3})+|\d{4,12})\b');
+      final formattedDigitMatch = formattedDigitRegex.firstMatch(text);
+      if (formattedDigitMatch != null) {
+        final rawNumStr = formattedDigitMatch.group(1)!.replaceAll('.', '').replaceAll(',', '');
+        final parsedNum = int.tryParse(rawNumStr) ?? 0;
+        if (parsedNum >= 1000) {
+          amount = parsedNum;
+        }
       }
     }
 
@@ -93,14 +97,14 @@ class VoiceParserUtil {
     }
 
     String category = 'Khác';
-    if (lower.contains('ăn') || lower.contains('cà phê') || lower.contains('phở') || lower.contains('cơm') || lower.contains('uống') || lower.contains('trà') || lower.contains('bún') || lower.contains('lẩu') || lower.contains('bánh')) {
+    if (lower.contains('tiền nhà') || lower.contains('hóa đơn') || lower.contains('tiền điện') || lower.contains('tiền nước') || lower.contains('điện') || lower.contains('nước') || lower.contains('internet') || lower.contains('truyền hình')) {
+      category = 'Hóa đơn';
+    } else if (lower.contains('ăn sáng') || lower.contains('ăn trưa') || lower.contains('ăn tối') || lower.contains('đồ ăn') || lower.contains('cà phê') || lower.contains('phở') || lower.contains('cơm') || lower.contains('uống') || lower.contains('trà') || lower.contains('bún') || lower.contains('lẩu') || lower.contains('bánh') || RegExp(r'(?<=^|\s)ăn(?=$|\s)').hasMatch(lower)) {
       category = 'Đồ ăn';
     } else if (lower.contains('xe') || lower.contains('xăng') || lower.contains('grab') || lower.contains('đi lại') || lower.contains('bus') || lower.contains('gửi xe') || lower.contains('taxi')) {
       category = 'Đi lại';
     } else if (lower.contains('mua') || lower.contains('shopee') || lower.contains('sắm') || lower.contains('quần áo') || lower.contains('giày') || lower.contains('siêu thị') || lower.contains('lazada') || lower.contains('tiki')) {
       category = 'Mua sắm';
-    } else if (lower.contains('hóa đơn') || lower.contains('tiền điện') || lower.contains('tiền nước') || lower.contains('điện') || lower.contains('nước') || lower.contains('internet') || lower.contains('truyền hình')) {
-      category = 'Hóa đơn';
     } else if (lower.contains('điện thoại') || lower.contains('nạp thẻ') || lower.contains('4g') || lower.contains('mạng') || lower.contains('wifi')) {
       category = 'Điện thoại';
     } else if (lower.contains('thuốc') || lower.contains('bệnh viện') || lower.contains('khám') || lower.contains('sức khỏe') || lower.contains('nha khoa')) {

@@ -37,7 +37,9 @@ class _MainNavigationScreenState
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    AutoTransactionService.instance.initialize();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      AutoTransactionService.instance.initialize();
+    });
   }
 
   @override
@@ -140,7 +142,6 @@ class _MainNavigationScreenState
       },
     );
 
-    // F1 Fix: Không gán chuỗi lỗi vào _recognizedText khi mic hỏng, tránh hiện nút "Tiếp tục" sai UX
     if (!_speechAvailable) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -154,24 +155,56 @@ class _MainNavigationScreenState
 
     final prefs = await SharedPreferences.getInstance();
     final lang = prefs.getString('language') ?? 'Tiếng Việt';
-    String localeId = 'vi_VN';
+    String targetLocale = 'vi_VN';
     if (lang == 'English') {
-      localeId = 'en_US';
+      targetLocale = 'en_US';
     } else if (lang == '日本語') {
-      localeId = 'ja_JP';
+      targetLocale = 'ja_JP';
     } else {
-      try {
-        final systemLoc = await _speech.systemLocale();
-        final locales = await _speech.locales();
-        final hasVi = locales.any((l) => l.localeId == 'vi_VN' || l.localeId == 'vi-VN' || l.localeId.startsWith('vi'));
-        if (hasVi) {
-          final viMatch = locales.firstWhere((l) => l.localeId == 'vi_VN' || l.localeId == 'vi-VN' || l.localeId.startsWith('vi'));
-          localeId = viMatch.localeId;
-        } else if (systemLoc != null) {
-          localeId = systemLoc.localeId;
-        }
-      } catch (_) {}
+      targetLocale = 'vi_VN';
     }
+
+    String chosenLocaleId = targetLocale;
+    try {
+      final locales = await _speech.locales();
+      final hasMatch = locales.any((l) =>
+        l.localeId.replaceAll('-', '_').toLowerCase() == targetLocale.toLowerCase() ||
+        l.localeId.toLowerCase().startsWith(targetLocale.split('_')[0])
+      );
+
+      if (hasMatch) {
+        final matched = locales.firstWhere((l) =>
+          l.localeId.replaceAll('-', '_').toLowerCase() == targetLocale.toLowerCase() ||
+          l.localeId.toLowerCase().startsWith(targetLocale.split('_')[0])
+        );
+        chosenLocaleId = matched.localeId;
+      } else if (targetLocale.startsWith('vi')) {
+        if (!mounted) return;
+        showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            backgroundColor: AppColors.card,
+            title: const Text('Cài đặt Google Voice Typing Tiếng Việt', style: TextStyle(color: AppColors.textDark, fontWeight: FontWeight.bold)),
+            content: const Text(
+              'Gói ngôn ngữ Tiếng Việt chưa sẵn sàng trên ứng dụng Google Voice Typing của thiết bị.\n\n'
+              'Hướng dẫn bật:\n'
+              '1. Vào Cài đặt thiết bị -> Bàn phím & Ngôn ngữ (Language & Input).\n'
+              '2. Chọn Nhập liệu bằng giọng nói của Google (Google Voice Typing).\n'
+              '3. Thêm ngôn ngữ Tiếng Việt (Vietnamese) vào danh sách.\n'
+              '4. Khởi động lại tính năng thu âm.',
+              style: TextStyle(color: AppColors.textSub, fontSize: 13),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Đã hiểu', style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.bold)),
+              ),
+            ],
+          ),
+        );
+        return;
+      }
+    } catch (_) {}
 
     if (!mounted || !_isDialogOpen) return;
 
@@ -184,7 +217,7 @@ class _MainNavigationScreenState
     });
 
     await _speech.listen(
-      localeId: localeId,
+      localeId: chosenLocaleId,
       onResult: (result) {
         if (!mounted || !_isDialogOpen) return;
 

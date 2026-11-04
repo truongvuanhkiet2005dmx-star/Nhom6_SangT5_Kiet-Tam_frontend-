@@ -41,6 +41,7 @@ class _WalletsTabState extends State<WalletsTab> {
   }
 
   Future<void> _loadWallets() async {
+    final sw = Stopwatch()..start();
     final prefs = await SharedPreferences.getInstance();
     final userId = prefs.getInt('userId');
 
@@ -69,7 +70,8 @@ class _WalletsTabState extends State<WalletsTab> {
       _isLoading = false;
     });
 
-    unawaited(SyncService.instance.syncUnsyncedWallets(userId));
+    sw.stop();
+    debugPrint("[Performance] WalletsTab._loadWallets completed in ${sw.elapsedMilliseconds}ms");
   }
 
   String _formatMoney(int amount) {

@@ -12,6 +12,7 @@ import 'services/api_service.dart';
 import 'services/notification_service.dart';
 
 void main() async {
+  final swMain = Stopwatch()..start();
   WidgetsFlutterBinding.ensureInitialized();
 
   try {
@@ -46,6 +47,9 @@ void main() async {
     debugPrint("Error initializing NotificationService: $e");
   }
 
+  swMain.stop();
+  debugPrint("[Performance] main() setup completed in ${swMain.elapsedMilliseconds}ms");
+
   runApp(const SmartMoneyApp());
 }
 
@@ -60,31 +64,15 @@ class _SmartMoneyAppState extends State<SmartMoneyApp> {
   late final Future<Widget> _startScreenFuture = _getStartScreen();
 
   Future<Widget> _getStartScreen() async {
+    final swStart = Stopwatch()..start();
     final prefs = await SharedPreferences.getInstance();
     final isLoggedIn = prefs.getBool('isLoggedIn') ?? false;
-    final biometricEnabled = prefs.getBool('biometricEnabled') ?? false;
+
+    swStart.stop();
+    debugPrint("[Performance] _getStartScreen completed in ${swStart.elapsedMilliseconds}ms");
 
     if (isLoggedIn) {
-      if (biometricEnabled) {
-        final localAuth = LocalAuthentication();
-        try {
-          bool canCheck = await localAuth.canCheckBiometrics || await localAuth.isDeviceSupported();
-          if (canCheck) {
-            bool authenticated = await localAuth.authenticate(
-              localizedReason: 'Xác thực sinh trắc học để vào ứng dụng SmartMoney',
-              options: const AuthenticationOptions(biometricOnly: true, stickyAuth: true),
-            );
-            if (!authenticated) {
-              return _BiometricLockScreen(onRetry: () {
-                setState(() {});
-              });
-            }
-          }
-        } catch (e) {
-          debugPrint("[main] Biometric auth error on start: $e");
-        }
-      }
-      return const MainNavigationScreen();
+      return const _BiometricGuard(child: MainNavigationScreen());
     }
 
     return const WelcomeSetupScreen();
@@ -127,10 +115,100 @@ class _SmartMoneyAppState extends State<SmartMoneyApp> {
   }
 }
 
+class _BiometricGuard extends StatefulWidget {
+  final Widget child;
+
+  const _BiometricGuard({required this.child});
+
+  @override
+  State<_BiometricGuard> createState() => _BiometricGuardState();
+}
+
+class _BiometricGuardState extends State<_BiometricGuard> {
+  bool _isLocked = false;
+  bool _isAuthenticating = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkAndAuthenticate();
+    });
+  }
+
+  Future<void> _checkAndAuthenticate() async {
+    final prefs = await SharedPreferences.getInstance();
+    final biometricEnabled = prefs.getBool('biometricEnabled') ?? false;
+
+    if (!biometricEnabled) return;
+
+    setState(() {
+      _isLocked = true;
+    });
+
+    _authenticate();
+  }
+
+  Future<void> _authenticate() async {
+    if (_isAuthenticating) return;
+
+    setState(() {
+      _isAuthenticating = true;
+    });
+
+    try {
+      final localAuth = LocalAuthentication();
+      bool canCheck = await localAuth.canCheckBiometrics || await localAuth.isDeviceSupported();
+
+      if (canCheck) {
+        bool authenticated = await localAuth.authenticate(
+          localizedReason: 'Xác thực sinh trắc học để vào ứng dụng SmartMoney',
+          options: const AuthenticationOptions(biometricOnly: true, stickyAuth: true),
+        );
+
+        if (authenticated && mounted) {
+          setState(() {
+            _isLocked = false;
+          });
+        }
+      } else if (mounted) {
+        // Nếu thiết bị không hỗ trợ sinh trắc học thì tự mở khóa
+        setState(() {
+          _isLocked = false;
+        });
+      }
+    } catch (e) {
+      debugPrint("[main] Post-frame biometric auth error: $e");
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isAuthenticating = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_isLocked) {
+      return _BiometricLockScreen(
+        isAuthenticating: _isAuthenticating,
+        onRetry: _authenticate,
+      );
+    }
+
+    return widget.child;
+  }
+}
+
 class _BiometricLockScreen extends StatelessWidget {
+  final bool isAuthenticating;
   final VoidCallback onRetry;
 
-  const _BiometricLockScreen({required this.onRetry});
+  const _BiometricLockScreen({
+    required this.isAuthenticating,
+    required this.onRetry,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -157,8 +235,14 @@ class _BiometricLockScreen extends StatelessWidget {
               const SizedBox(height: 28),
               ElevatedButton.icon(
                 style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
-                onPressed: onRetry,
-                icon: const Icon(Icons.lock_open, color: Colors.black),
+                onPressed: isAuthenticating ? null : onRetry,
+                icon: isAuthenticating
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(color: Colors.black, strokeWidth: 2),
+                      )
+                    : const Icon(Icons.lock_open, color: Colors.black),
                 label: const Text('Mở khóa', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
               ),
             ],

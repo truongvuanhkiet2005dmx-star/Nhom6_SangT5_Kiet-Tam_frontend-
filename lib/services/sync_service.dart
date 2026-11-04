@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../database/database_helper.dart';
@@ -8,10 +9,19 @@ class SyncService {
   SyncService._init();
 
   bool _isSyncing = false;
+  bool _isSyncingWallets = false;
+  Timer? _debounceSyncTimer;
 
   bool get isSyncing => _isSyncing;
 
   Future<void> syncUnsyncedWallets(int userId) async {
+    if (_isSyncingWallets) {
+      debugPrint("[SyncService] syncUnsyncedWallets đang chạy. Bỏ qua yêu cầu song song.");
+      return;
+    }
+    _isSyncingWallets = true;
+    final sw = Stopwatch()..start();
+
     try {
       final token = await ApiService.instance.getToken();
       if (token == null || token.isEmpty) return;
@@ -49,6 +59,10 @@ class SyncService {
       }
     } catch (e) {
       debugPrint("[SyncService] Lỗi khi đồng bộ ví: $e");
+    } finally {
+      sw.stop();
+      debugPrint("[Performance] SyncService.syncUnsyncedWallets completed in ${sw.elapsedMilliseconds}ms");
+      _isSyncingWallets = false;
     }
   }
 
@@ -186,6 +200,8 @@ class SyncService {
     }
 
     _isSyncing = true;
+    final sw = Stopwatch()..start();
+
     try {
       final token = await ApiService.instance.getToken();
       if (token == null || token.isEmpty) return;
@@ -262,11 +278,16 @@ class SyncService {
     } catch (e) {
       debugPrint("[SyncService] Lỗi tổng quát khi đồng bộ hai chiều: $e");
     } finally {
+      sw.stop();
+      debugPrint("[Performance] SyncService.pullAndSyncFromBackend completed in ${sw.elapsedMilliseconds}ms");
       _isSyncing = false;
     }
   }
 
   Future<void> syncAllPendingTransactions(int userId) async {
-    await pullAndSyncFromBackend(userId);
+    _debounceSyncTimer?.cancel();
+    _debounceSyncTimer = Timer(const Duration(milliseconds: 500), () {
+      pullAndSyncFromBackend(userId);
+    });
   }
 }
