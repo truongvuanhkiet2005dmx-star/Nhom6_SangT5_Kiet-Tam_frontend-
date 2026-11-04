@@ -84,10 +84,14 @@ class _ReportsTabState extends State<ReportsTab> {
             total = (reportData['totalIncome'] as num?)?.toInt() ?? 0;
           }
 
-          final breakdownKey = _modeIndex == 0 ? 'expenseBreakdown' : 'incomeBreakdown';
-          final categoryList = reportData[breakdownKey] ?? reportData['categoryBreakdown'] ?? reportData['categories'] ?? reportData['breakdown'];
+          List<dynamic>? categoryList;
+          final breakdown = reportData['breakdown'];
+          if (breakdown is Map) {
+            final picked = _modeIndex == 0 ? breakdown['expense'] : breakdown['income'];
+            if (picked is List) categoryList = picked;
+          }
 
-          if (categoryList is List) {
+          if (categoryList != null) {
             for (var item in categoryList) {
               if (item is Map) {
                 final itemType = item['type']?.toString().toLowerCase();

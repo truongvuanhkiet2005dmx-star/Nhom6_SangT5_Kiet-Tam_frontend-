@@ -95,6 +95,13 @@ class ApiService {
       );
     }
 
+    if (statusCode == 429) {
+      throw ApiException(
+        'Bạn thao tác quá nhanh, vui lòng thử lại sau 1 phút.',
+        statusCode: 429,
+      );
+    }
+
     String errorMessage = 'Lỗi máy chủ ($statusCode)';
     if (parsedBody is Map) {
       if (parsedBody.containsKey('detail') && parsedBody['detail'] != null && parsedBody['detail'].toString().isNotEmpty) {
@@ -106,6 +113,8 @@ class ApiService {
       } else if (parsedBody.containsKey('error') && parsedBody['error'] != null && parsedBody['error'].toString().isNotEmpty) {
         errorMessage = parsedBody['error'].toString();
       }
+    } else if (parsedBody is String && parsedBody.isNotEmpty) {
+      errorMessage = parsedBody;
     } else if (responseBody.isNotEmpty) {
       errorMessage = responseBody;
     }
