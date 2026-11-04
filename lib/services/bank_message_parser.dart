@@ -216,7 +216,7 @@ class BankMessageParser {
     }
 
     String? note;
-    final ndMatch = RegExp(r'(?:ND|Nội\s*dung)\s*[:=]?\s*(.*)', caseSensitive: false).firstMatch(content);
+    final ndMatch = RegExp(r'\b(?:ND|Nội\s*dung)\b\s*[:=]?\s*(.*)', caseSensitive: false).firstMatch(content);
     if (ndMatch != null) {
       note = ndMatch.group(1)?.trim();
     }

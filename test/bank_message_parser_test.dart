@@ -70,5 +70,43 @@ void main() {
 
       expect(result, isNull);
     });
+
+    test('6. VietinBank Multiline Income Pattern', () {
+      const sample = '''VietinBank:04/11/2026 23:10
+TK:104880072280
+GD:+10,000 VND
+SDC:145,000 VND
+ND:rút tiền về tài khoản, REQ_ID 155158452424''';
+
+      final result = BankMessageParser.parse(sample);
+
+      expect(result, isNotNull);
+      expect(result!.bankName, equals('VietinBank'));
+      expect(result.accountNumber, equals('104880072280'));
+      expect(result.amount, equals(10000));
+      expect(result.isExpense, isFalse);
+      expect(result.endingBalance, equals(145000));
+      expect(result.refId, equals('155158452424'));
+      expect(result.displayNote, equals('rút tiền về tài khoản, REQ_ID 155158452424'));
+    });
+
+    test('7. VietinBank Multiline Expense Pattern', () {
+      const sample = '''VietinBank:04/11/2026 23:15
+TK:104880072280
+GD:-50,000 VND
+SDC:95,000 VND
+ND:thanh toán mua sắm, REQ_ID 155158452425''';
+
+      final result = BankMessageParser.parse(sample);
+
+      expect(result, isNotNull);
+      expect(result!.bankName, equals('VietinBank'));
+      expect(result.accountNumber, equals('104880072280'));
+      expect(result.amount, equals(50000));
+      expect(result.isExpense, isTrue);
+      expect(result.endingBalance, equals(95000));
+      expect(result.refId, equals('155158452425'));
+      expect(result.displayNote, equals('thanh toán mua sắm, REQ_ID 155158452425'));
+    });
   });
 }
