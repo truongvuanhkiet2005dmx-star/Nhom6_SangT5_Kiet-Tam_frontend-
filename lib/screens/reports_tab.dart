@@ -16,6 +16,7 @@ class ReportsTab extends StatefulWidget {
 class _ReportsTabState extends State<ReportsTab> {
   int _modeIndex = 0; // 0: Chi tiêu, 1: Thu nhập
   int _selectedMonth = DateTime.now().month;
+  int _selectedYear = DateTime.now().year;
   bool _isLoading = true;
 
   int _totalAmount = 0;
@@ -63,7 +64,6 @@ class _ReportsTabState extends State<ReportsTab> {
     }
 
     bool fetchedFromBackend = false;
-    final now = DateTime.now();
     int total = 0;
     Map<String, int> categories = {};
 
@@ -72,7 +72,7 @@ class _ReportsTabState extends State<ReportsTab> {
       final token = await ApiService.instance.getToken();
       if (token != null && token.isNotEmpty) {
         final reportData = await ApiService.instance.getMonthlyReport(
-          year: now.year,
+          year: _selectedYear,
           month: _selectedMonth,
           familyGroupId: activeFamilyGroupId,
         );
@@ -85,18 +85,18 @@ class _ReportsTabState extends State<ReportsTab> {
           }
 
           final breakdownKey = _modeIndex == 0 ? 'expenseBreakdown' : 'incomeBreakdown';
-          final categoryList = reportData[breakdownKey] ?? reportData['categoryBreakdown'] ?? reportData['categories'];
+          final categoryList = reportData[breakdownKey] ?? reportData['categoryBreakdown'] ?? reportData['categories'] ?? reportData['breakdown'];
 
           if (categoryList is List) {
             for (var item in categoryList) {
               if (item is Map) {
                 final itemType = item['type']?.toString().toLowerCase();
                 final catName = item['categoryName']?.toString() ?? item['category']?.toString() ?? 'Khác';
-                if (itemType == 'transfer' || catName.toLowerCase().contains('chuyển khoản') || catName.toLowerCase().contains('transfer')) {
+                if (itemType == 'transfer' || itemType == 'adjustment' || catName.toLowerCase().contains('chuyển khoản') || catName.toLowerCase().contains('điều chỉnh')) {
                   continue;
                 }
                 final catAmt = ((item['amount'] ?? item['total']) as num?)?.toInt() ?? 0;
-                categories[catName] = catAmt;
+                categories[catName] = (categories[catName] ?? 0) + catAmt;
               }
             }
           }
@@ -130,7 +130,7 @@ class _ReportsTabState extends State<ReportsTab> {
           final date = DateTime.tryParse(tx['date'].toString());
           if (date == null) continue;
 
-          if (date.year == now.year && date.month == _selectedMonth) {
+          if (date.year == _selectedYear && date.month == _selectedMonth) {
             final amount = (tx['amount'] as num?)?.toInt() ?? 0;
             final category = tx['categoryName'].toString();
 
@@ -220,8 +220,6 @@ class _ReportsTabState extends State<ReportsTab> {
     final categories = _categoryTotals.entries.toList()
       ..sort((a, b) => b.value.compareTo(a.value));
 
-    final now = DateTime.now();
-
     final double circleProgress = (_monthlyBudget <= 0 || _totalAmount <= 0)
         ? 0.0
         : (_totalAmount / _monthlyBudget.toDouble()).clamp(0.0, 1.0);
@@ -308,6 +306,36 @@ class _ReportsTabState extends State<ReportsTab> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        'Chọn Năm:',
+                        style: TextStyle(color: AppColors.textDark, fontWeight: FontWeight.bold, fontSize: 14),
+                      ),
+                      DropdownButton<int>(
+                        value: _selectedYear,
+                        dropdownColor: AppColors.card,
+                        style: const TextStyle(color: AppColors.textDark, fontWeight: FontWeight.bold),
+                        items: List.generate(10, (i) => DateTime.now().year - 5 + i).map((y) {
+                          return DropdownMenuItem<int>(
+                            value: y,
+                            child: Text('Năm $y'),
+                          );
+                        }).toList(),
+                        onChanged: (val) {
+                          if (val != null) {
+                            setState(() => _selectedYear = val);
+                            _loadReports();
+                          }
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+
                 SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
                   child: Row(
@@ -331,7 +359,7 @@ class _ReportsTabState extends State<ReportsTab> {
                             ),
                           ),
                           child: Text(
-                            'thg $m ${now.year}',
+                            'thg $m $_selectedYear',
                             style: TextStyle(
                               color: isSelected ? AppColors.textDark : AppColors.textSub,
                               fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,

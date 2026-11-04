@@ -3,7 +3,6 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import '../core/constants.dart';
 
 class ApiException implements Exception {
@@ -39,15 +38,6 @@ class ApiService {
     if (savedToken != null && savedToken.isNotEmpty) {
       return savedToken;
     }
-
-    try {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user != null) {
-        final token = await user.getIdToken();
-        if (token != null && token.isNotEmpty) return token;
-      }
-    } catch (_) {}
-
     return null;
   }
 
@@ -105,28 +95,16 @@ class ApiService {
       );
     }
 
-    if (statusCode == 403) {
-      throw ApiException(
-        'Bạn không có quyền thực hiện thao tác này.',
-        statusCode: 403,
-      );
-    }
-
-    if (statusCode == 409) {
-      throw ApiException(
-        'Không thể thực hiện thao tác do xung đột dữ liệu trên máy chủ.',
-        statusCode: 409,
-      );
-    }
-
     String errorMessage = 'Lỗi máy chủ ($statusCode)';
     if (parsedBody is Map) {
-      if (parsedBody.containsKey('message') && parsedBody['message'] != null) {
+      if (parsedBody.containsKey('detail') && parsedBody['detail'] != null && parsedBody['detail'].toString().isNotEmpty) {
+        errorMessage = parsedBody['detail'].toString();
+      } else if (parsedBody.containsKey('message') && parsedBody['message'] != null && parsedBody['message'].toString().isNotEmpty) {
         errorMessage = parsedBody['message'].toString();
-      } else if (parsedBody.containsKey('error') && parsedBody['error'] != null) {
-        errorMessage = parsedBody['error'].toString();
-      } else if (parsedBody.containsKey('title') && parsedBody['title'] != null) {
+      } else if (parsedBody.containsKey('title') && parsedBody['title'] != null && parsedBody['title'].toString().isNotEmpty) {
         errorMessage = parsedBody['title'].toString();
+      } else if (parsedBody.containsKey('error') && parsedBody['error'] != null && parsedBody['error'].toString().isNotEmpty) {
+        errorMessage = parsedBody['error'].toString();
       }
     } else if (responseBody.isNotEmpty) {
       errorMessage = responseBody;
@@ -580,13 +558,16 @@ class ApiService {
   }
 
   // 5. Transaction Endpoints
-  Future<List<dynamic>> getTransactions({int? year, int? month}) async {
+  Future<List<dynamic>> getTransactions({int? year, int? month, int page = 1, int pageSize = 100}) async {
     final base = await baseUrl;
-    final queryParams = <String, String>{};
+    final queryParams = <String, String>{
+      'page': page.toString(),
+      'pageSize': pageSize.toString(),
+    };
     if (year != null) queryParams['year'] = year.toString();
     if (month != null) queryParams['month'] = month.toString();
 
-    final uri = Uri.parse('$base/transactions').replace(queryParameters: queryParams.isEmpty ? null : queryParams);
+    final uri = Uri.parse('$base/transactions').replace(queryParameters: queryParams);
 
     try {
       final response = await _client
@@ -614,6 +595,18 @@ class ApiService {
     final base = await baseUrl;
     final uri = Uri.parse('$base/transactions');
 
+    DateTime dateObj;
+    final rawDate = payload['occurredAtUtc'] ?? payload['occurredAt'] ?? payload['date'];
+    if (rawDate != null && rawDate.toString().isNotEmpty) {
+      dateObj = DateTime.tryParse(rawDate.toString())?.toUtc() ?? DateTime.now().toUtc();
+    } else {
+      dateObj = DateTime.now().toUtc();
+    }
+    var isoUtc = dateObj.toIso8601String();
+    if (!isoUtc.endsWith('Z')) {
+      isoUtc = '${isoUtc}Z';
+    }
+
     final dtoPayload = <String, dynamic>{
       'eventId': payload['eventId']?.toString() ?? '',
       'amount': (payload['amount'] as num?)?.toInt().abs() ?? 0,
@@ -621,7 +614,7 @@ class ApiService {
       'source': payload['source']?.toString() ?? payload['walletName']?.toString() ?? 'Ví tài khoản',
       'bankName': payload['bankName']?.toString() ?? '',
       'packageName': payload['packageName']?.toString() ?? '',
-      'occurredAt': payload['occurredAt'] ?? payload['occurredAtUtc'] ?? DateTime.now().toUtc().toIso8601String(),
+      'occurredAtUtc': isoUtc,
       'categoryName': payload['categoryName']?.toString() ?? 'Khác',
       'note': payload['note']?.toString() ?? '',
     };

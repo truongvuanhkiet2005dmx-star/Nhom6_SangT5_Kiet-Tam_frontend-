@@ -53,9 +53,15 @@ class SyncService {
 
   Future<bool> syncTransaction(Map<String, dynamic> tx) async {
     final txId = tx['id'] as int?;
-    final eventId = (tx['eventId']?.toString().isNotEmpty == true && tx['eventId'].toString() != 'tx_0')
-        ? tx['eventId'].toString()
-        : DatabaseHelper.instance.generateUuid();
+    var eventId = tx['eventId']?.toString();
+
+    if (eventId == null || eventId.isEmpty || eventId.startsWith('tx_')) {
+      eventId = DatabaseHelper.instance.generateUuid();
+      if (txId != null && txId > 0) {
+        final db = await DatabaseHelper.instance.database;
+        await db.update('transactions', {'eventId': eventId}, where: 'id = ?', whereArgs: [txId]);
+      }
+    }
 
     try {
       final token = await ApiService.instance.getToken();
@@ -81,7 +87,10 @@ class SyncService {
       } else {
         occurredDate = DateTime.now();
       }
-      final String occurredAtUtc = occurredDate.toUtc().toIso8601String();
+      var occurredAtUtc = occurredDate.toUtc().toIso8601String();
+      if (!occurredAtUtc.endsWith('Z')) {
+        occurredAtUtc = '${occurredAtUtc}Z';
+      }
 
       final int amount = (tx['amount'] as num?)?.toInt().abs() ?? 0;
       if (amount <= 0) return false;
@@ -127,7 +136,6 @@ class SyncService {
         'bankName': bankName,
         'packageName': packageName,
         'occurredAtUtc': occurredAtUtc,
-        'occurredAt': occurredAtUtc,
         'note': note,
       };
 
@@ -203,12 +211,26 @@ class SyncService {
         }
       }
 
-      // 4. Tải các giao dịch từ Backend về local SQLite (upsert)
+      // 4. Tải các giao dịch từ Backend về local SQLite (upsert với phân trang)
       try {
-        final remoteTxs = await ApiService.instance.getTransactions();
-        for (var rtx in remoteTxs) {
-          if (rtx is Map<String, dynamic>) {
-            await DatabaseHelper.instance.upsertTransactionFromBackend(userId, rtx);
+        int page = 1;
+        const pageSize = 100;
+        bool hasMore = true;
+        while (hasMore) {
+          final remoteTxs = await ApiService.instance.getTransactions(page: page, pageSize: pageSize);
+          if (remoteTxs.isEmpty) {
+            hasMore = false;
+            break;
+          }
+          for (var rtx in remoteTxs) {
+            if (rtx is Map<String, dynamic>) {
+              await DatabaseHelper.instance.upsertTransactionFromBackend(userId, rtx);
+            }
+          }
+          if (remoteTxs.length < pageSize) {
+            hasMore = false;
+          } else {
+            page++;
           }
         }
       } catch (e) {

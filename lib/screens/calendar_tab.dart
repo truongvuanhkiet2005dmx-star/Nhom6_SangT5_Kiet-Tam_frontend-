@@ -54,8 +54,13 @@ class _CalendarTabState extends State<CalendarTab> {
       final Map<DateTime, List<Map<String, dynamic>>> events = {};
 
       for (final transaction in transactions) {
-        final date = DateTime.tryParse(transaction['date'].toString());
+        final rawDate = transaction['date'].toString();
+        DateTime? date = DateTime.tryParse(rawDate);
         if (date == null) continue;
+
+        if (rawDate.endsWith('Z')) {
+          date = date.toLocal();
+        }
 
         final day = _normalizeDate(date);
         events.putIfAbsent(day, () => []);

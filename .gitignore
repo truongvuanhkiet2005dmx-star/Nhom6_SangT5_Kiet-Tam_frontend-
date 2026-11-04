@@ -60,3 +60,4 @@ app.*.map.json
 .artifacts/
 **/ephemeral/
 
+android/build/

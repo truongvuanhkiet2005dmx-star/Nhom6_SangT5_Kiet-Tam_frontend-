@@ -329,14 +329,7 @@ class AutoTransactionService {
       }
 
       if (userId == null) {
-        final userRows = await db.query('users', orderBy: 'id DESC', limit: 1);
-        if (userRows.isNotEmpty) {
-          userId = userRows.first['id'] as int?;
-        }
-      }
-
-      if (userId == null) {
-        debugPrint("[AutoTransactionService] Bỏ qua lưu giao dịch tự động vì chưa có người dùng đăng nhập trong CSDL.");
+        debugPrint("[AutoTransactionService] Bỏ qua lưu giao dịch tự động vì chưa có người dùng đăng nhập.");
         return;
       }
     }
@@ -345,12 +338,14 @@ class AutoTransactionService {
     List<Map<String, dynamic>> wallets = await DatabaseHelper.instance.getWallets(activeUserId);
 
     if (wallets.isEmpty) {
+      final newClientId = DatabaseHelper.instance.generateUuid();
       int newWalletId = await db.insert('wallets', {
         'userId': activeUserId,
         'name': 'Ví VietinBank',
         'type': 'bank',
-        'balance': parsedAccountBalance ?? 1000000,
+        'balance': 0,
         'accountNumber': extractedStk ?? '',
+        'clientId': newClientId,
       });
       wallets = [
         {
@@ -358,14 +353,14 @@ class AutoTransactionService {
           'userId': activeUserId,
           'name': 'Ví VietinBank',
           'type': 'bank',
-          'balance': parsedAccountBalance ?? 1000000,
+          'balance': 0,
           'accountNumber': extractedStk ?? '',
+          'clientId': newClientId,
         }
       ];
     }
 
     final matchedWalletCandidate = findMatchingWallet(wallets, rawContent, extractedStk);
-    final isExactMatched = matchedWalletCandidate != null;
     final matchedWallet = matchedWalletCandidate ?? wallets.first;
 
     final walletId = matchedWallet['id'] as int;
@@ -382,14 +377,8 @@ class AutoTransactionService {
     final generatedEventId = DatabaseHelper.instance.generateUuid();
 
     int insertedTxId = 0;
-    int newBalance = 0;
+    int newBalance = isExpense ? currentBalance - amount : currentBalance + amount;
     await db.transaction((txn) async {
-      if (isExactMatched && parsedAccountBalance != null) {
-        newBalance = parsedAccountBalance;
-      } else {
-        newBalance = isExpense ? currentBalance - amount : currentBalance + amount;
-      }
-
       await txn.update(
         'wallets',
         {'balance': newBalance},

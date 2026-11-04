@@ -500,7 +500,7 @@ class _AddTransactionScreenState
       try {
         final txData = {
           'id': insertedId,
-          'eventId': 'tx_$insertedId',
+          'eventId': generatedEventId,
           'amount': amount,
           'type': _tabIndex == 0 ? 'expense' : (_tabIndex == 1 ? 'income' : 'transfer'),
           'walletId': _selectedWalletId,

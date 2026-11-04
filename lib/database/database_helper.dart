@@ -31,7 +31,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 9,
+      version: 10,
       onCreate: _createDB,
       onUpgrade: _onUpgrade,
     );
@@ -123,6 +123,7 @@ class DatabaseHelper {
         toWalletId INTEGER,
         amount INTEGER NOT NULL,
         type TEXT NOT NULL,
+        adjustmentDirection TEXT,
         isExpense INTEGER NOT NULL,
         categoryName TEXT NOT NULL,
         date TEXT NOT NULL,
@@ -344,6 +345,17 @@ class DatabaseHelper {
         ''');
       } catch (e) {
         debugPrint("[DatabaseHelper] Migration v9 warning: $e");
+      }
+    }
+
+    if (oldVersion < 10) {
+      try {
+        await db.execute('''
+          ALTER TABLE transactions
+          ADD COLUMN adjustmentDirection TEXT
+        ''');
+      } catch (e) {
+        debugPrint("[DatabaseHelper] Migration v10 warning: $e");
       }
     }
   }
@@ -835,6 +847,17 @@ class DatabaseHelper {
     );
   }
 
+  Future<bool> hasUnsyncedTransactionsForWallet(int localWalletId) async {
+    final db = await instance.database;
+    final res = await db.query(
+      'transactions',
+      where: 'walletId = ? AND (isSynced IS NULL OR isSynced = 0)',
+      whereArgs: [localWalletId],
+      limit: 1,
+    );
+    return res.isNotEmpty;
+  }
+
   Future<void> updateWalletServerId(int localId, int serverId) async {
     final db = await instance.database;
     await db.update(
@@ -898,11 +921,13 @@ class DatabaseHelper {
 
       if (existingByServerId.isNotEmpty) {
         final localId = existingByServerId.first['id'] as int;
+        final hasPending = await hasUnsyncedTransactionsForWallet(localId);
+
         await db.update(
           'wallets',
           {
             'name': name,
-            'balance': balance,
+            if (!hasPending) 'balance': balance,
             'type': type,
             if (clientId != null && clientId.isNotEmpty) 'clientId': clientId,
           },
@@ -923,12 +948,14 @@ class DatabaseHelper {
 
       if (existingByClientId.isNotEmpty) {
         final localId = existingByClientId.first['id'] as int;
+        final hasPending = await hasUnsyncedTransactionsForWallet(localId);
+
         await db.update(
           'wallets',
           {
             'serverId': serverId,
             'name': name,
-            'balance': balance,
+            if (!hasPending) 'balance': balance,
             'type': type,
           },
           where: 'id = ?',
@@ -936,29 +963,6 @@ class DatabaseHelper {
         );
         return localId;
       }
-    }
-
-    final existingByName = await db.query(
-      'wallets',
-      where: 'name = ? AND userId = ?',
-      whereArgs: [name, localUserId],
-      limit: 1,
-    );
-
-    if (existingByName.isNotEmpty) {
-      final localId = existingByName.first['id'] as int;
-      await db.update(
-        'wallets',
-        {
-          'serverId': serverId,
-          'balance': balance,
-          'type': type,
-          if (clientId != null && clientId.isNotEmpty) 'clientId': clientId,
-        },
-        where: 'id = ?',
-        whereArgs: [localId],
-      );
-      return localId;
     }
 
     return await db.insert('wallets', {
@@ -977,6 +981,7 @@ class DatabaseHelper {
     final eventId = remoteTx['eventId']?.toString();
     final amount = (remoteTx['amount'] as num?)?.toInt().abs() ?? 0;
     final type = remoteTx['type']?.toString() ?? 'expense';
+    final adjustmentDirection = remoteTx['adjustmentDirection']?.toString();
     final isExpense = type == 'income' ? 0 : 1;
     final categoryName = remoteTx['categoryName']?.toString() ?? 'Khác';
     final date = remoteTx['occurredAtUtc']?.toString() ?? remoteTx['occurredAt']?.toString() ?? DateTime.now().toUtc().toIso8601String();
@@ -991,6 +996,15 @@ class DatabaseHelper {
       }
     }
 
+    int? localToWalletId;
+    final remoteToWalletId = (remoteTx['toWalletId'] as num?)?.toInt();
+    if (remoteToWalletId != null && remoteToWalletId > 0) {
+      final localToWallet = await getWalletByServerId(remoteToWalletId);
+      if (localToWallet != null) {
+        localToWalletId = localToWallet['id'] as int?;
+      }
+    }
+
     if (eventId != null && eventId.isNotEmpty) {
       final existingByEvent = await getTransactionByEventId(eventId);
       if (existingByEvent != null) {
@@ -1001,12 +1015,14 @@ class DatabaseHelper {
             'serverId': serverId,
             'amount': amount,
             'type': type,
+            if (adjustmentDirection != null) 'adjustmentDirection': adjustmentDirection,
             'isExpense': isExpense,
             'categoryName': categoryName,
             'date': date,
             'note': note,
             'isSynced': 1,
             if (localWalletId != null) 'walletId': localWalletId,
+            if (localToWalletId != null) 'toWalletId': localToWalletId,
           },
           where: 'id = ?',
           whereArgs: [localId],
@@ -1030,6 +1046,7 @@ class DatabaseHelper {
           {
             'amount': amount,
             'type': type,
+            if (adjustmentDirection != null) 'adjustmentDirection': adjustmentDirection,
             'isExpense': isExpense,
             'categoryName': categoryName,
             'date': date,
@@ -1037,6 +1054,7 @@ class DatabaseHelper {
             'isSynced': 1,
             if (eventId != null) 'eventId': eventId,
             if (localWalletId != null) 'walletId': localWalletId,
+            if (localToWalletId != null) 'toWalletId': localToWalletId,
           },
           where: 'id = ?',
           whereArgs: [localId],
@@ -1049,8 +1067,10 @@ class DatabaseHelper {
       'serverId': serverId,
       'userId': localUserId,
       'walletId': localWalletId,
+      'toWalletId': localToWalletId,
       'amount': amount,
       'type': type,
+      'adjustmentDirection': adjustmentDirection,
       'isExpense': isExpense,
       'categoryName': categoryName,
       'date': date,
