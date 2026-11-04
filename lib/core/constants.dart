@@ -21,9 +21,11 @@ class AppConstants {
     }
   }
 
+  static const String _demoBackendUrl = 'https://encroach-perfume-clasp.ngrok-free.dev/api';
+
   static String get backendBaseUrl {
     if (_envBackendUrl.isNotEmpty) return _envBackendUrl;
-    return defaultBackendBaseUrl;
+    return _demoBackendUrl;
   }
 
   static const List<String> allowedBankPackages = [
