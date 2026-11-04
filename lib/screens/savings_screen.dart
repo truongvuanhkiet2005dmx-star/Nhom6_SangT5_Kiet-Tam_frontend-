@@ -140,10 +140,6 @@ class _SavingsScreenState extends State<SavingsScreen> {
         );
       },
     );
-
-    nameController.dispose();
-    targetController.dispose();
-    initialController.dispose();
   }
 
   Future<void> _depositMoneyDialog(Map<String, dynamic> goal) async {
@@ -263,8 +259,6 @@ class _SavingsScreenState extends State<SavingsScreen> {
         );
       },
     );
-
-    amountController.dispose();
   }
 
   @override

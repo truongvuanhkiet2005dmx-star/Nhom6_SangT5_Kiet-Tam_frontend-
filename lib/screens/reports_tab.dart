@@ -105,9 +105,7 @@ class _ReportsTabState extends State<ReportsTab> {
             }
           }
 
-          if (total > 0 || categories.isNotEmpty) {
-            fetchedFromBackend = true;
-          }
+          fetchedFromBackend = true;
         }
       }
     } catch (e) {

@@ -495,7 +495,6 @@ class ApiService {
     final validParams = {
       'name': name,
       'initialBalance': balance,
-      'balance': balance,
       'type': normalizeWalletType(type),
       if (clientId != null && clientId.isNotEmpty) 'clientId': clientId,
     };

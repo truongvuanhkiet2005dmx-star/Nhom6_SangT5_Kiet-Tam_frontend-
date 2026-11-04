@@ -31,7 +31,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 10,
+      version: 11,
       onCreate: _createDB,
       onUpgrade: _onUpgrade,
     );
@@ -104,6 +104,7 @@ class DatabaseHelper {
         userId INTEGER NOT NULL,
         name TEXT NOT NULL,
         balance INTEGER NOT NULL DEFAULT 0,
+        initialBalance INTEGER NOT NULL DEFAULT 0,
         type TEXT NOT NULL,
         accountNumber TEXT,
         FOREIGN KEY (userId) REFERENCES users(id)
@@ -358,6 +359,57 @@ class DatabaseHelper {
         debugPrint("[DatabaseHelper] Migration v10 warning: $e");
       }
     }
+
+    if (oldVersion < 11) {
+      try {
+        await db.execute('''
+          ALTER TABLE wallets
+          ADD COLUMN initialBalance INTEGER NOT NULL DEFAULT 0
+        ''');
+
+        final allWallets = await db.query('wallets');
+        for (final wallet in allWallets) {
+          final wId = wallet['id'] as int;
+          final curBal = (wallet['balance'] as num?)?.toInt() ?? 0;
+
+          final txs = await db.query('transactions', where: 'walletId = ? OR toWalletId = ?', whereArgs: [wId, wId]);
+          int totalEffect = 0;
+          for (final tx in txs) {
+            final amt = (tx['amount'] as num?)?.toInt().abs() ?? 0;
+            final type = tx['type']?.toString();
+            final adjDir = tx['adjustmentDirection']?.toString();
+            final isExpense = tx['isExpense'] == 1;
+            final isWalletSource = tx['walletId'] == wId;
+            final isWalletTarget = tx['toWalletId'] == wId;
+
+            if (type == 'income') {
+              totalEffect += amt;
+            } else if (type == 'expense') {
+              totalEffect -= amt;
+            } else if (type == 'transfer') {
+              if (isWalletSource) totalEffect -= amt;
+              if (isWalletTarget) totalEffect += amt;
+            } else if (type == 'adjustment') {
+              if (adjDir == 'increase' || (!isExpense)) {
+                totalEffect += amt;
+              } else {
+                totalEffect -= amt;
+              }
+            }
+          }
+
+          final calculatedInitial = curBal - totalEffect;
+          await db.update(
+            'wallets',
+            {'initialBalance': calculatedInitial},
+            where: 'id = ?',
+            whereArgs: [wId],
+          );
+        }
+      } catch (e) {
+        debugPrint("[DatabaseHelper] Migration v11 warning: $e");
+      }
+    }
   }
 
   Future<int> registerUser(
@@ -382,6 +434,7 @@ class DatabaseHelper {
       'userId': userId,
       'name': 'Ví tiền mặt',
       'balance': 0,
+      'initialBalance': 0,
       'type': 'cash',
       'accountNumber': '',
       'clientId': generateUuid(),
@@ -494,6 +547,7 @@ class DatabaseHelper {
           'userId': userId,
           'name': 'Ví VietinBank',
           'balance': 0,
+          'initialBalance': 0,
           'type': 'bank',
           'accountNumber': '',
           'clientId': generateUuid(),
@@ -507,6 +561,7 @@ class DatabaseHelper {
         'userId': userId,
         'name': 'Ví VietinBank',
         'balance': 0,
+        'initialBalance': 0,
         'type': 'bank',
         'accountNumber': '',
         'clientId': generateUuid(),
@@ -545,6 +600,10 @@ class DatabaseHelper {
 
     if (walletMap['clientId'] == null || walletMap['clientId'].toString().isEmpty) {
       walletMap['clientId'] = generateUuid();
+    }
+
+    if (!walletMap.containsKey('initialBalance')) {
+      walletMap['initialBalance'] = walletMap['balance'] ?? 0;
     }
 
     return await db.insert(
@@ -851,8 +910,8 @@ class DatabaseHelper {
     final db = await instance.database;
     final res = await db.query(
       'transactions',
-      where: 'walletId = ? AND (isSynced IS NULL OR isSynced = 0)',
-      whereArgs: [localWalletId],
+      where: '(walletId = ? OR toWalletId = ?) AND (isSynced IS NULL OR isSynced = 0)',
+      whereArgs: [localWalletId, localWalletId],
       limit: 1,
     );
     return res.isNotEmpty;
@@ -878,24 +937,24 @@ class DatabaseHelper {
     );
   }
 
-  Future<Map<String, dynamic>?> getWalletByServerId(int serverId) async {
+  Future<Map<String, dynamic>?> getWalletByServerId(int serverId, [int? userId]) async {
     final db = await instance.database;
     final result = await db.query(
       'wallets',
-      where: 'serverId = ?',
-      whereArgs: [serverId],
+      where: userId != null ? 'serverId = ? AND userId = ?' : 'serverId = ?',
+      whereArgs: userId != null ? [serverId, userId] : [serverId],
       limit: 1,
     );
     if (result.isEmpty) return null;
     return result.first;
   }
 
-  Future<Map<String, dynamic>?> getTransactionByEventId(String eventId) async {
+  Future<Map<String, dynamic>?> getTransactionByEventId(String eventId, [int? userId]) async {
     final db = await instance.database;
     final result = await db.query(
       'transactions',
-      where: 'eventId = ?',
-      whereArgs: [eventId],
+      where: userId != null ? 'eventId = ? AND userId = ?' : 'eventId = ?',
+      whereArgs: userId != null ? [eventId, userId] : [eventId],
       limit: 1,
     );
     if (result.isEmpty) return null;
@@ -909,6 +968,7 @@ class DatabaseHelper {
     final clientId = remoteWallet['clientId']?.toString();
     final name = remoteWallet['name']?.toString() ?? 'Ví';
     final balance = (remoteWallet['currentBalance'] ?? remoteWallet['balance'] ?? remoteWallet['initialBalance'] as num?)?.toInt() ?? 0;
+    final initialBalance = (remoteWallet['initialBalance'] as num?)?.toInt() ?? balance;
     final type = remoteWallet['type']?.toString() ?? 'bank';
 
     if (serverId != null && serverId > 0) {
@@ -928,6 +988,7 @@ class DatabaseHelper {
           {
             'name': name,
             if (!hasPending) 'balance': balance,
+            if (!hasPending) 'initialBalance': initialBalance,
             'type': type,
             if (clientId != null && clientId.isNotEmpty) 'clientId': clientId,
           },
@@ -956,6 +1017,7 @@ class DatabaseHelper {
             'serverId': serverId,
             'name': name,
             if (!hasPending) 'balance': balance,
+            if (!hasPending) 'initialBalance': initialBalance,
             'type': type,
           },
           where: 'id = ?',
@@ -971,6 +1033,7 @@ class DatabaseHelper {
       'userId': localUserId,
       'name': name,
       'balance': balance,
+      'initialBalance': initialBalance,
       'type': type,
     });
   }
@@ -990,7 +1053,7 @@ class DatabaseHelper {
     int? localWalletId;
     final remoteWalletId = (remoteTx['walletId'] as num?)?.toInt();
     if (remoteWalletId != null && remoteWalletId > 0) {
-      final localWallet = await getWalletByServerId(remoteWalletId);
+      final localWallet = await getWalletByServerId(remoteWalletId, localUserId);
       if (localWallet != null) {
         localWalletId = localWallet['id'] as int?;
       }
@@ -999,14 +1062,14 @@ class DatabaseHelper {
     int? localToWalletId;
     final remoteToWalletId = (remoteTx['toWalletId'] as num?)?.toInt();
     if (remoteToWalletId != null && remoteToWalletId > 0) {
-      final localToWallet = await getWalletByServerId(remoteToWalletId);
+      final localToWallet = await getWalletByServerId(remoteToWalletId, localUserId);
       if (localToWallet != null) {
         localToWalletId = localToWallet['id'] as int?;
       }
     }
 
     if (eventId != null && eventId.isNotEmpty) {
-      final existingByEvent = await getTransactionByEventId(eventId);
+      final existingByEvent = await getTransactionByEventId(eventId, localUserId);
       if (existingByEvent != null) {
         final localId = existingByEvent['id'] as int;
         await db.update(

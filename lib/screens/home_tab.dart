@@ -243,8 +243,6 @@ class _HomeTabState extends State<HomeTab> with WidgetsBindingObserver {
         );
       },
     );
-
-    controller.dispose();
   }
 
   String _formatMoney(int amount) {

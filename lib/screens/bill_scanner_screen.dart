@@ -332,7 +332,6 @@ class _BillScannerScreenState
       },
     );
 
-    amountController.dispose();
     return dialogResult;
   }
 

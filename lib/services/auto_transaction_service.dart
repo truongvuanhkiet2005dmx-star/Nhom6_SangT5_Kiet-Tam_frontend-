@@ -367,7 +367,11 @@ class AutoTransactionService {
     }
 
     final matchedWalletCandidate = findMatchingWallet(wallets, rawContent, extractedStk);
-    final matchedWallet = matchedWalletCandidate ?? wallets.first;
+    if (matchedWalletCandidate == null) {
+      debugPrint("[AutoTransactionService] Bỏ qua SMS/thông báo vì không tìm thấy ví ngân hàng phù hợp.");
+      return;
+    }
+    final matchedWallet = matchedWalletCandidate;
 
     final walletId = matchedWallet['id'] as int;
     final walletUserId = matchedWallet['userId'] as int? ?? activeUserId;

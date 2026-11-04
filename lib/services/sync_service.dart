@@ -24,6 +24,7 @@ class SyncService {
         final localId = wallet['id'] as int;
         final name = wallet['name']?.toString() ?? 'Ví';
         final balance = (wallet['balance'] as num?)?.toInt() ?? 0;
+        final initialBalance = (wallet['initialBalance'] as num?)?.toInt() ?? balance;
         final type = wallet['type']?.toString() ?? 'cash';
         final accountNumber = wallet['accountNumber']?.toString();
         final clientId = wallet['clientId']?.toString() ?? DatabaseHelper.instance.generateUuid();
@@ -31,7 +32,7 @@ class SyncService {
         try {
           final res = await ApiService.instance.createWallet(
             name: name,
-            balance: balance,
+            balance: initialBalance,
             type: type,
             accountNumber: accountNumber,
             clientId: clientId,
@@ -190,7 +191,16 @@ class SyncService {
       // 1. Đồng bộ ví local chưa có serverId
       await syncUnsyncedWallets(userId);
 
-      // 2. Tải ví từ Backend về local SQLite (upsert)
+      // 2. Gửi các giao dịch local chờ đồng bộ
+      final unsynced = await DatabaseHelper.instance.getUnsyncedTransactions(userId);
+      if (unsynced.isNotEmpty) {
+        debugPrint("[SyncService] Phát hiện ${unsynced.length} giao dịch chờ đồng bộ.");
+        for (var tx in unsynced) {
+          await syncTransaction(tx);
+        }
+      }
+
+      // 3. Tải ví từ Backend về local SQLite (upsert)
       try {
         final remoteWallets = await ApiService.instance.getWallets();
         for (var rw in remoteWallets) {
@@ -200,15 +210,6 @@ class SyncService {
         }
       } catch (e) {
         debugPrint("[SyncService] Lỗi kéo danh sách ví từ backend: $e");
-      }
-
-      // 3. Gửi các giao dịch local chờ đồng bộ
-      final unsynced = await DatabaseHelper.instance.getUnsyncedTransactions(userId);
-      if (unsynced.isNotEmpty) {
-        debugPrint("[SyncService] Phát hiện ${unsynced.length} giao dịch chờ đồng bộ.");
-        for (var tx in unsynced) {
-          await syncTransaction(tx);
-        }
       }
 
       // 4. Tải các giao dịch từ Backend về local SQLite (upsert với phân trang)

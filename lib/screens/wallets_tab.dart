@@ -433,6 +433,7 @@ class _AddWalletDialogState extends State<_AddWalletDialog> {
               'userId': widget.userId,
               'name': name,
               'balance': balance,
+              'initialBalance': balance,
               'type': _type,
               'accountNumber': accNum.isEmpty ? null : accNum,
               'clientId': newClientId,
