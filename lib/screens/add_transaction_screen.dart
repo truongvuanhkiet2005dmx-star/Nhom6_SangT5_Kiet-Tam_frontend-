@@ -641,49 +641,75 @@ class _AddTransactionScreenState
 
           Expanded(
             child: _tabIndex == 2
-                ? Padding(
-              padding: const EdgeInsets.all(24.0),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.swap_horiz, size: 60, color: AppColors.primary),
-                  const SizedBox(height: 16),
-                  const Text(
-                    'Chuyển tiền giữa 2 ví tài khoản',
-                    style: TextStyle(color: AppColors.textDark, fontSize: 16, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'Số tiền sẽ được trừ ở Ví nguồn và tự động cộng vào Ví đích.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: AppColors.textSub, fontSize: 13),
-                  ),
-                  const SizedBox(height: 24),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: () => _showWalletPicker(isTargetWallet: false),
-                          icon: const Icon(Icons.upload, color: Colors.redAccent),
-                          label: Text(_selectedWallet, style: const TextStyle(color: AppColors.textDark, fontSize: 12)),
+                ? SingleChildScrollView(
+                    padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 12.0),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const SizedBox(height: 12),
+                        const Icon(Icons.swap_horiz, size: 52, color: AppColors.primary),
+                        const SizedBox(height: 12),
+                        const Text(
+                          'Chuyển tiền giữa 2 ví tài khoản',
+                          style: TextStyle(color: AppColors.textDark, fontSize: 15, fontWeight: FontWeight.bold),
                         ),
-                      ),
-                      const Padding(
-                        padding: EdgeInsets.symmetric(horizontal: 8),
-                        child: Icon(Icons.arrow_forward, color: AppColors.primary),
-                      ),
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: () => _showWalletPicker(isTargetWallet: true),
-                          icon: const Icon(Icons.download, color: Colors.greenAccent),
-                          label: Text(_selectedToWallet, style: const TextStyle(color: AppColors.textDark, fontSize: 12)),
+                        const SizedBox(height: 6),
+                        const Text(
+                          'Số tiền sẽ được trừ ở Ví nguồn và tự động cộng vào Ví đích.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: AppColors.textSub, fontSize: 12),
                         ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            )
+                        const SizedBox(height: 20),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: OutlinedButton.icon(
+                                onPressed: () => _showWalletPicker(isTargetWallet: false),
+                                style: OutlinedButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+                                  side: const BorderSide(color: AppColors.border),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                ),
+                                icon: const Icon(Icons.upload, color: Colors.redAccent, size: 18),
+                                label: Flexible(
+                                  child: Text(
+                                    _selectedWallet,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(color: AppColors.textDark, fontSize: 12, fontWeight: FontWeight.w600),
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const Padding(
+                              padding: EdgeInsets.symmetric(horizontal: 6),
+                              child: Icon(Icons.arrow_forward, color: AppColors.primary, size: 20),
+                            ),
+                            Expanded(
+                              child: OutlinedButton.icon(
+                                onPressed: () => _showWalletPicker(isTargetWallet: true),
+                                style: OutlinedButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+                                  side: const BorderSide(color: AppColors.border),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                ),
+                                icon: const Icon(Icons.download, color: Colors.greenAccent, size: 18),
+                                label: Flexible(
+                                  child: Text(
+                                    _selectedToWallet,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(color: AppColors.textDark, fontSize: 12, fontWeight: FontWeight.w600),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                      ],
+                    ),
+                  )
                 : SingleChildScrollView(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               child: Column(
@@ -749,28 +775,39 @@ class _AddTransactionScreenState
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    GestureDetector(
-                      onTap: () => _showWalletPicker(isTargetWallet: false),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: AppColors.card,
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: AppColors.border),
-                        ),
-                        child: Row(
-                          children: [
-                            const Icon(Icons.account_balance_wallet, size: 18, color: AppColors.primary),
-                            const SizedBox(width: 6),
-                            Text(_selectedWallet, style: const TextStyle(color: AppColors.textDark, fontSize: 13, fontWeight: FontWeight.bold)),
-                          ],
+                    Flexible(
+                      child: GestureDetector(
+                        onTap: () => _showWalletPicker(isTargetWallet: false),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: AppColors.card,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: AppColors.border),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.account_balance_wallet, size: 18, color: AppColors.primary),
+                              const SizedBox(width: 6),
+                              Flexible(
+                                child: Text(
+                                  _selectedWallet,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(color: AppColors.textDark, fontSize: 13, fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     ),
+                    const SizedBox(width: 8),
                     Text(
                       '$_formattedAmount đ',
                       style: const TextStyle(
-                        fontSize: 28,
+                        fontSize: 26,
                         fontWeight: FontWeight.bold,
                         color: AppColors.textDark,
                       ),
@@ -1232,16 +1269,37 @@ class _NoteDialogState extends State<_NoteDialog> {
   Widget build(BuildContext context) {
     return AlertDialog(
       backgroundColor: AppColors.card,
-      title: const Text('Ghi chú giao dịch', style: TextStyle(color: AppColors.textDark)),
-      content: TextField(
-        controller: _controller,
-        maxLines: 3,
-        autofocus: true,
-        style: const TextStyle(color: AppColors.textDark),
-        decoration: const InputDecoration(
-          hintText: 'Ví dụ: Ăn sáng, Mua quà...',
-          hintStyle: TextStyle(color: AppColors.textSub),
-          border: OutlineInputBorder(),
+      scrollable: true,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      title: const Text(
+        'Ghi chú giao dịch',
+        style: TextStyle(color: AppColors.textDark, fontWeight: FontWeight.bold, fontSize: 16),
+      ),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: _controller,
+              maxLines: 3,
+              autofocus: true,
+              style: const TextStyle(color: AppColors.textDark, fontSize: 14),
+              decoration: InputDecoration(
+                hintText: 'Ví dụ: Ăn sáng, Cà phê với bạn...',
+                hintStyle: const TextStyle(color: AppColors.textSub, fontSize: 13),
+                filled: true,
+                fillColor: AppColors.surface,
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: AppColors.border),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: AppColors.primary, width: 1.5),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
       actions: [
@@ -1250,7 +1308,10 @@ class _NoteDialogState extends State<_NoteDialog> {
           child: const Text('Hủy', style: TextStyle(color: AppColors.textSub)),
         ),
         ElevatedButton(
-          style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: AppColors.primary,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          ),
           onPressed: () {
             Navigator.pop(context, _controller.text.trim());
           },
