@@ -7,6 +7,7 @@ import '../database/database_helper.dart';
 import '../services/api_service.dart';
 import '../services/sync_service.dart';
 import 'main_navigation_screen.dart';
+import 'register_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   final String language;
@@ -765,6 +766,36 @@ class _LoginScreenState extends State<LoginScreen> {
                   ],
                 ),
               ],
+
+              const SizedBox(height: 28),
+
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Text(
+                    'Chưa có tài khoản? ',
+                    style: TextStyle(color: AppColors.textSub, fontSize: 14),
+                  ),
+                  GestureDetector(
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const RegisterScreen(),
+                        ),
+                      );
+                    },
+                    child: const Text(
+                      'Đăng ký ngay',
+                      style: TextStyle(
+                        color: AppColors.primary,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ],
           ),
         ),

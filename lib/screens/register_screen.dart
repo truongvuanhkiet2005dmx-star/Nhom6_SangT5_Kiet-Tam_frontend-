@@ -19,7 +19,8 @@ class RegisterScreen extends StatefulWidget {
 }
 
 class _RegisterScreenState extends State<RegisterScreen> {
-  final TextEditingController _usernameController = TextEditingController();
+  final TextEditingController _emailController = TextEditingController();
+  final TextEditingController _displayNameController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
   final TextEditingController _confirmPasswordController = TextEditingController();
 
@@ -39,12 +40,23 @@ class _RegisterScreenState extends State<RegisterScreen> {
   }
 
   Future<void> _handleRegister() async {
-    final username = _usernameController.text.trim();
+    final email = _emailController.text.trim();
+    final displayName = _displayNameController.text.trim();
     final password = _passwordController.text;
     final confirmPassword = _confirmPasswordController.text;
 
-    if (username.isEmpty || password.isEmpty || confirmPassword.isEmpty) {
-      _showSnackBar('Vui lòng điền đầy đủ thông tin!', Colors.orange);
+    if (email.isEmpty || !email.contains('@') || !email.contains('.')) {
+      _showSnackBar('Vui lòng nhập Địa chỉ Email hợp lệ!', Colors.orange);
+      return;
+    }
+
+    if (displayName.isEmpty) {
+      _showSnackBar('Vui lòng nhập Tên hiển thị!', Colors.orange);
+      return;
+    }
+
+    if (password.length < 6) {
+      _showSnackBar('Mật khẩu phải có ít nhất 6 ký tự!', Colors.orange);
       return;
     }
 
@@ -53,25 +65,15 @@ class _RegisterScreenState extends State<RegisterScreen> {
       return;
     }
 
-    if (password.length < 6) {
-      _showSnackBar('Mật khẩu phải có ít nhất 6 ký tự!', Colors.red);
-      return;
-    }
-
     setState(() {
       _isLoading = true;
     });
 
     try {
-      String displayName = username;
-      if (username.contains('@')) {
-        displayName = username.split('@')[0];
-      }
-
-      // 1. Gọi backend API POST /auth/register
+      // 1. Gọi Backend API POST /api/auth/register (email, password, displayName)
       try {
         await ApiService.instance.register(
-          email: username,
+          email: email,
           password: password,
           displayName: displayName,
         );
@@ -85,32 +87,36 @@ class _RegisterScreenState extends State<RegisterScreen> {
         }
       }
 
-      // 2. Thử xác thực Firebase Auth
+      // 2. Thử tạo tài khoản Firebase Auth
       User? fbUser;
-      if (username.contains('@')) {
-        try {
-          final cred = await FirebaseAuth.instance.createUserWithEmailAndPassword(
-            email: username,
-            password: password,
-          );
-          fbUser = cred.user;
-        } catch (_) {}
-      }
+      try {
+        final cred = await FirebaseAuth.instance.createUserWithEmailAndPassword(
+          email: email,
+          password: password,
+        );
+        fbUser = cred.user;
+      } catch (_) {}
 
-      // 3. Đăng ký CSDL SQLite cục bộ
-      final userId = await DatabaseHelper.instance.registerUser(username, password);
+      // 3. Tạo tài khoản CSDL SQLite cục bộ
+      final userId = await DatabaseHelper.instance.registerUser(email, password);
 
       if (fbUser != null && fbUser.email != null) {
         await DatabaseHelper.instance.findOrCreateUserByFirebaseUid(
           firebaseUid: fbUser.uid,
           email: fbUser.email!,
-          displayName: fbUser.displayName,
+          displayName: displayName,
+        );
+      } else {
+        await DatabaseHelper.instance.findOrCreateUserByEmail(
+          email: email,
+          displayName: displayName,
         );
       }
 
       final prefs = await SharedPreferences.getInstance();
       await prefs.setInt('userId', userId);
-      await prefs.setString('username', username);
+      await prefs.setString('username', email);
+      await prefs.setString('displayName', displayName);
       await prefs.setBool('isLoggedIn', true);
 
       await _registerFcmToken();
@@ -119,6 +125,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
       if (!mounted) return;
 
       setState(() => _isLoading = false);
+
+      _showSnackBar('Đăng ký tài khoản thành công! Bắt đầu thiết lập ví.', Colors.green);
 
       Navigator.pushReplacement(
         context,
@@ -134,8 +142,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
       final isDuplicate = e.toString().toLowerCase().contains('unique');
       _showSnackBar(
         isDuplicate
-            ? 'Tên đăng nhập hoặc Email này đã được sử dụng!'
-            : 'Đăng ký không thành công. Vui lòng thử lại!',
+            ? 'Địa chỉ Email này đã được sử dụng!'
+            : 'Đăng ký không thành công: $e',
         Colors.red,
       );
     }
@@ -234,7 +242,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
   @override
   void dispose() {
-    _usernameController.dispose();
+    _emailController.dispose();
+    _displayNameController.dispose();
     _passwordController.dispose();
     _confirmPasswordController.dispose();
     super.dispose();
@@ -266,7 +275,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               const Text(
-                'Tạo Tài Khoản',
+                'Tạo Tài Khoản Mới',
                 style: TextStyle(
                   fontSize: 28,
                   fontWeight: FontWeight.bold,
@@ -284,7 +293,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
               const SizedBox(height: 28),
 
               const Text(
-                'Tên đăng nhập / Email',
+                'Địa chỉ Email / Gmail',
                 style: TextStyle(
                   fontWeight: FontWeight.w600,
                   color: AppColors.textDark,
@@ -293,10 +302,31 @@ class _RegisterScreenState extends State<RegisterScreen> {
               const SizedBox(height: 8),
 
               TextField(
-                controller: _usernameController,
+                controller: _emailController,
+                keyboardType: TextInputType.emailAddress,
                 style: const TextStyle(color: AppColors.textDark),
                 decoration: _inputDecoration(
-                  'Nhập tên hoặc email...',
+                  'Nhập email (ví dụ: user@gmail.com)...',
+                  Icons.email_outlined,
+                ),
+              ),
+
+              const SizedBox(height: 20),
+
+              const Text(
+                'Tên hiển thị (Họ và Tên)',
+                style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textDark,
+                ),
+              ),
+              const SizedBox(height: 8),
+
+              TextField(
+                controller: _displayNameController,
+                style: const TextStyle(color: AppColors.textDark),
+                decoration: _inputDecoration(
+                  'Nhập tên của bạn (ví dụ: Nguyễn Văn A)...',
                   Icons.person_outline,
                 ),
               ),
@@ -317,7 +347,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 obscureText: _obscurePassword,
                 style: const TextStyle(color: AppColors.textDark),
                 decoration: _passwordDecoration(
-                  'Nhập mật khẩu...',
+                  'Nhập mật khẩu (tối thiểu 6 ký tự)...',
                   _obscurePassword,
                   () {
                     setState(() {
@@ -368,20 +398,20 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 ),
                 child: _isLoading
                     ? const SizedBox(
-                  height: 20,
-                  width: 20,
-                  child: CircularProgressIndicator(
-                    color: Colors.black,
-                    strokeWidth: 2,
-                  ),
-                )
+                        height: 20,
+                        width: 20,
+                        child: CircularProgressIndicator(
+                          color: Colors.black,
+                          strokeWidth: 2,
+                        ),
+                      )
                     : const Text(
-                  'Đăng ký',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
+                        'Đăng Ký Tài Khoản',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
               ),
 
               const SizedBox(height: 16),
