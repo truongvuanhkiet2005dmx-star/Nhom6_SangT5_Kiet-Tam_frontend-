@@ -1,14 +1,11 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
-import 'package:google_sign_in/google_sign_in.dart';
 import '../core/app_colors.dart';
-import '../core/constants.dart';
 import '../database/database_helper.dart';
 import '../services/api_service.dart';
 import '../services/sync_service.dart';
-import 'register_screen.dart';
 import 'main_navigation_screen.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -26,11 +23,35 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final TextEditingController _usernameController = TextEditingController();
-  final TextEditingController _passwordController = TextEditingController();
+  final TextEditingController _emailController = TextEditingController();
+  final TextEditingController _codeController = TextEditingController();
 
-  bool _obscurePassword = true;
+  int _step = 1; // 1: Nhập Email, 2: Nhập mã OTP
   bool _isLoading = false;
+  int _timerSeconds = 60;
+  Timer? _timer;
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _emailController.dispose();
+    _codeController.dispose();
+    super.dispose();
+  }
+
+  void _startTimer() {
+    _timer?.cancel();
+    setState(() => _timerSeconds = 60);
+    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) return;
+      if (_timerSeconds > 1) {
+        setState(() => _timerSeconds--);
+      } else {
+        _timer?.cancel();
+        setState(() => _timerSeconds = 0);
+      }
+    });
+  }
 
   Future<void> _registerFcmToken() async {
     try {
@@ -43,162 +64,75 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  Future<void> _handleLogin() async {
-    final username = _usernameController.text.trim();
-    final password = _passwordController.text;
+  Future<void> _handleRequestOtp() async {
+    final email = _emailController.text.trim();
 
-    if (username.isEmpty || password.isEmpty) {
-      _showSnackBar('Vui lòng nhập đầy đủ thông tin!', Colors.orange);
+    if (email.isEmpty || !email.contains('@')) {
+      _showSnackBar('Vui lòng nhập Email hợp lệ!', Colors.orange);
       return;
     }
 
     setState(() => _isLoading = true);
 
     try {
-      Map<String, dynamic>? backendAuthData;
-
-      // 1. Gọi backend API POST /auth/login
-      try {
-        backendAuthData = await ApiService.instance.login(
-          email: username,
-          password: password,
-        );
-      } catch (backendError) {
-        debugPrint("[LoginScreen] Backend login error: $backendError");
-        if (backendError is ApiException) {
-          if (!mounted) return;
-          setState(() => _isLoading = false);
-          _showSnackBar(backendError.message, Colors.red);
-          return;
-        }
-      }
-
-      // 2. Thử xác thực Firebase Auth nếu là email
-      User? fbUser;
-      if (username.contains('@')) {
-        try {
-          final cred = await FirebaseAuth.instance.signInWithEmailAndPassword(
-            email: username,
-            password: password,
-          );
-          fbUser = cred.user;
-        } catch (_) {}
-      }
-
-      // 3. Tìm hoặc tạo SQLite User cục bộ
-      var user = await DatabaseHelper.instance.loginUser(username, password);
-
-      if (user == null) {
-        if (fbUser != null && fbUser.email != null) {
-          user = await DatabaseHelper.instance.findOrCreateUserByFirebaseUid(
-            firebaseUid: fbUser.uid,
-            email: fbUser.email!,
-            displayName: fbUser.displayName,
-          );
-        } else {
-          final newUserId = await DatabaseHelper.instance.registerUser(username, password);
-          user = await DatabaseHelper.instance.getUserById(newUserId);
-        }
-      }
+      await ApiService.instance.requestOtp(email: email);
 
       if (!mounted) return;
 
-      if (user == null) {
-        setState(() => _isLoading = false);
-        _showSnackBar('Tên đăng nhập hoặc mật khẩu không đúng!', Colors.red);
-        return;
-      }
+      _startTimer();
+      setState(() {
+        _step = 2;
+        _isLoading = false;
+      });
 
-      final userId = user['id'] as int;
-      final prefs = await SharedPreferences.getInstance();
-
-      await prefs.setBool('isLoggedIn', true);
-      await prefs.setInt('userId', userId);
-      await prefs.setString('username', user['username'] as String);
-      await prefs.setString('language', widget.language);
-      await prefs.setString('currency', widget.currency);
-
-      if (backendAuthData != null && backendAuthData.containsKey('user')) {
-        final backendUser = backendAuthData['user'];
-        if (backendUser is Map && backendUser.containsKey('displayName')) {
-          await prefs.setString('displayName', backendUser['displayName'].toString());
-        }
-      }
-
-      await _registerFcmToken();
-      SyncService.instance.pullAndSyncFromBackend(userId);
-
-      setState(() => _isLoading = false);
-
-      Navigator.pushAndRemoveUntil(
-        context,
-        MaterialPageRoute(builder: (context) => const MainNavigationScreen()),
-        (route) => false,
-      );
+      _showSnackBar('Mã OTP đã được gửi tới email $email', Colors.green);
     } catch (e) {
       if (!mounted) return;
 
       setState(() => _isLoading = false);
-      _showSnackBar('Đăng nhập không thành công: $e', Colors.red);
+      final errorMsg = e is ApiException ? e.message : 'Không thể gửi mã OTP: $e';
+      _showSnackBar(errorMsg, Colors.red);
     }
   }
 
-  Future<void> _handleGoogleSignIn() async {
+  Future<void> _handleVerifyOtp() async {
+    final email = _emailController.text.trim();
+    final code = _codeController.text.trim();
+
+    if (code.isEmpty) {
+      _showSnackBar('Vui lòng nhập mã OTP!', Colors.orange);
+      return;
+    }
+
     setState(() => _isLoading = true);
 
     try {
-      final GoogleSignIn googleSignIn = GoogleSignIn(
-        scopes: ['email'],
-        serverClientId: AppConstants.googleServerClientId,
-      );
-      final GoogleSignInAccount? googleUser = await googleSignIn.signIn();
+      final responseData = await ApiService.instance.verifyOtp(email: email, code: code);
 
-      if (googleUser == null) {
-        if (mounted) setState(() => _isLoading = false);
-        return;
+      String? displayName;
+      if (responseData.containsKey('user') && responseData['user'] is Map) {
+        final uMap = responseData['user'] as Map;
+        displayName = uMap['displayName']?.toString();
       }
 
-      final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
-      final credential = GoogleAuthProvider.credential(
-        accessToken: googleAuth.accessToken,
-        idToken: googleAuth.idToken,
-      );
-
-      final UserCredential userCredential = await FirebaseAuth.instance.signInWithCredential(credential);
-      final user = userCredential.user;
-
-      if (user == null || user.email == null || user.email!.isEmpty) {
-        throw Exception("Không thể lấy thông tin Email từ Google.");
-      }
-
-      final firebaseIdToken = await user.getIdToken();
-      if (firebaseIdToken == null || firebaseIdToken.isEmpty) {
-        throw Exception("Không thể lấy Firebase ID Token.");
-      }
-
-      try {
-        await ApiService.instance.loginWithGoogle(idToken: firebaseIdToken);
-      } catch (backendErr) {
-        // Đăng nhập backend qua Google thất bại -> hủy trạng thái đăng nhập Firebase
-        await FirebaseAuth.instance.signOut();
-        await googleSignIn.signOut();
-        rethrow;
-      }
-
-      final sqliteUser = await DatabaseHelper.instance.findOrCreateUserByFirebaseUid(
-        firebaseUid: user.uid,
-        email: user.email!,
-        displayName: user.displayName ?? user.email!,
+      final sqliteUser = await DatabaseHelper.instance.findOrCreateUserByEmail(
+        email: email,
+        displayName: displayName,
       );
 
       final userId = sqliteUser['id'] as int;
       final prefs = await SharedPreferences.getInstance();
+
       await prefs.setBool('isLoggedIn', true);
       await prefs.setInt('userId', userId);
       await prefs.setString('username', sqliteUser['username'] as String);
       await prefs.setString('language', widget.language);
       await prefs.setString('currency', widget.currency);
 
+      if (displayName != null && displayName.isNotEmpty) {
+        await prefs.setString('displayName', displayName);
+      }
+
       await _registerFcmToken();
       SyncService.instance.pullAndSyncFromBackend(userId);
 
@@ -215,7 +149,8 @@ class _LoginScreenState extends State<LoginScreen> {
       if (!mounted) return;
 
       setState(() => _isLoading = false);
-      _showSnackBar('Đăng nhập Google không thành công: $e', Colors.red);
+      final errorMsg = e is ApiException ? e.message : 'Xác minh OTP thất bại: $e';
+      _showSnackBar(errorMsg, Colors.red);
     }
   }
 
@@ -225,15 +160,9 @@ class _LoginScreenState extends State<LoginScreen> {
       SnackBar(
         content: Text(message),
         backgroundColor: color,
+        duration: const Duration(seconds: 4),
       ),
     );
-  }
-
-  @override
-  void dispose() {
-    _usernameController.dispose();
-    _passwordController.dispose();
-    super.dispose();
   }
 
   @override
@@ -249,7 +178,13 @@ class _LoginScreenState extends State<LoginScreen> {
             color: AppColors.textDark,
             size: 20,
           ),
-          onPressed: () => Navigator.pop(context),
+          onPressed: () {
+            if (_step == 2) {
+              setState(() => _step = 1);
+            } else {
+              Navigator.pop(context);
+            }
+          },
         ),
       ),
       body: SafeArea(
@@ -263,9 +198,9 @@ class _LoginScreenState extends State<LoginScreen> {
             children: [
               const SizedBox(height: 10),
 
-              const Text(
-                'Đăng Nhập',
-                style: TextStyle(
+              Text(
+                _step == 1 ? 'Đăng Nhập Email OTP' : 'Nhập Mã OTP',
+                style: const TextStyle(
                   fontSize: 28,
                   fontWeight: FontWeight.bold,
                   color: AppColors.textDark,
@@ -284,216 +219,225 @@ class _LoginScreenState extends State<LoginScreen> {
 
               const SizedBox(height: 28),
 
-              const Text(
-                'Tên đăng nhập / Email',
-                style: TextStyle(
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.textDark,
-                ),
-              ),
-
-              const SizedBox(height: 8),
-
-              TextField(
-                controller: _usernameController,
-                style: const TextStyle(color: AppColors.textDark),
-                decoration: InputDecoration(
-                  hintText: 'Nhập tên hoặc email...',
-                  hintStyle: const TextStyle(
-                    color: AppColors.textSub,
-                    fontSize: 14,
-                  ),
-                  prefixIcon: const Icon(
-                    Icons.person_outline,
-                    color: AppColors.primary,
-                  ),
-                  filled: true,
-                  fillColor: AppColors.card,
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(16),
-                    borderSide: const BorderSide(
-                      color: AppColors.border,
-                    ),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(16),
-                    borderSide: const BorderSide(
-                      color: AppColors.primary,
-                      width: 1.5,
-                    ),
-                  ),
-                ),
-              ),
-
-              const SizedBox(height: 20),
-
-              const Text(
-                'Mật khẩu',
-                style: TextStyle(
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.textDark,
-                ),
-              ),
-
-              const SizedBox(height: 8),
-
-              TextField(
-                controller: _passwordController,
-                obscureText: _obscurePassword,
-                style: const TextStyle(color: AppColors.textDark),
-                decoration: InputDecoration(
-                  hintText: 'Nhập mật khẩu...',
-                  hintStyle: const TextStyle(
-                    color: AppColors.textSub,
-                    fontSize: 14,
-                  ),
-                  prefixIcon: const Icon(
-                    Icons.lock_outline,
-                    color: AppColors.primary,
-                  ),
-                  suffixIcon: IconButton(
-                    icon: Icon(
-                      _obscurePassword
-                          ? Icons.visibility_off_outlined
-                          : Icons.visibility_outlined,
-                      color: AppColors.primary,
-                    ),
-                    onPressed: () {
-                      setState(() {
-                        _obscurePassword = !_obscurePassword;
-                      });
-                    },
-                  ),
-                  filled: true,
-                  fillColor: AppColors.card,
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(16),
-                    borderSide: const BorderSide(
-                      color: AppColors.border,
-                    ),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(16),
-                    borderSide: const BorderSide(
-                      color: AppColors.primary,
-                      width: 1.5,
-                    ),
-                  ),
-                ),
-              ),
-
-              Align(
-                alignment: Alignment.centerRight,
-                child: TextButton(
-                  onPressed: () async {
-                    final email = _usernameController.text.trim();
-                    if (email.isEmpty || !email.contains('@')) {
-                      _showSnackBar('Vui lòng nhập Email vào ô bên trên để khôi phục!', Colors.orange);
-                      return;
-                    }
-                    try {
-                      await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
-                      _showSnackBar('Đã gửi email khôi phục mật khẩu tới $email!', Colors.green);
-                    } catch (e) {
-                      _showSnackBar('Không thể gửi email khôi phục mật khẩu!', Colors.red);
-                    }
-                  },
-                  child: const Text(
-                    'Quên mật khẩu?',
-                    style: TextStyle(
-                      color: AppColors.textSub,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 13,
-                    ),
-                  ),
-                ),
-              ),
-
-              const SizedBox(height: 12),
-
-              ElevatedButton(
-                onPressed: _isLoading ? null : _handleLogin,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.primary,
-                  foregroundColor: Colors.black,
-                  elevation: 0,
-                  padding: const EdgeInsets.symmetric(
-                    vertical: 16,
-                  ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                ),
-                child: _isLoading
-                    ? const SizedBox(
-                  height: 20,
-                  width: 20,
-                  child: CircularProgressIndicator(
-                    color: Colors.black,
-                    strokeWidth: 2,
-                  ),
-                )
-                    : const Text(
-                  'Đăng nhập',
+              if (_step == 1) ...[
+                const Text(
+                  'Địa chỉ Email / Gmail',
                   style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-
-              const SizedBox(height: 16),
-
-              OutlinedButton.icon(
-                onPressed: _isLoading ? null : _handleGoogleSignIn,
-                style: OutlinedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  side: const BorderSide(color: AppColors.border),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                ),
-                icon: const Icon(Icons.g_mobiledata, color: Colors.redAccent, size: 28),
-                label: const Text(
-                  'Đăng nhập bằng Google',
-                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
                     color: AppColors.textDark,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 15,
                   ),
                 ),
-              ),
 
-              const SizedBox(height: 24),
+                const SizedBox(height: 8),
 
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Text(
-                    'Chưa có tài khoản? ',
-                    style: TextStyle(
+                TextField(
+                  controller: _emailController,
+                  keyboardType: TextInputType.emailAddress,
+                  style: const TextStyle(color: AppColors.textDark),
+                  decoration: InputDecoration(
+                    hintText: 'Nhập email của bạn (ví dụ: user@gmail.com)...',
+                    hintStyle: const TextStyle(
                       color: AppColors.textSub,
+                      fontSize: 14,
                     ),
-                  ),
-                  GestureDetector(
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => const RegisterScreen(),
-                        ),
-                      );
-                    },
-                    child: const Text(
-                      'Đăng ký ngay',
-                      style: TextStyle(
+                    prefixIcon: const Icon(
+                      Icons.email_outlined,
+                      color: AppColors.primary,
+                    ),
+                    filled: true,
+                    fillColor: AppColors.card,
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      borderSide: const BorderSide(
+                        color: AppColors.border,
+                      ),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      borderSide: const BorderSide(
                         color: AppColors.primary,
-                        fontWeight: FontWeight.bold,
+                        width: 1.5,
                       ),
                     ),
                   ),
-                ],
-              ),
+                ),
+
+                const SizedBox(height: 24),
+
+                ElevatedButton(
+                  onPressed: _isLoading ? null : _handleRequestOtp,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.black,
+                    elevation: 0,
+                    padding: const EdgeInsets.symmetric(
+                      vertical: 16,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                  ),
+                  child: _isLoading
+                      ? const SizedBox(
+                    height: 20,
+                    width: 20,
+                    child: CircularProgressIndicator(
+                      color: Colors.black,
+                      strokeWidth: 2,
+                    ),
+                  )
+                      : const Text(
+                    'Gửi Mã OTP',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ] else ...[
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: AppColors.card,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: AppColors.border),
+                  ),
+                  child: Column(
+                    children: [
+                      const Icon(Icons.mark_email_read_outlined, size: 40, color: AppColors.primary),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Mã xác thực đã được gửi tới:',
+                        style: const TextStyle(color: AppColors.textSub, fontSize: 13),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        _emailController.text.trim(),
+                        style: const TextStyle(
+                          color: AppColors.textDark,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 15,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 20),
+
+                const Text(
+                  'Nhập mã OTP (6 chữ số)',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textDark,
+                  ),
+                ),
+
+                const SizedBox(height: 8),
+
+                TextField(
+                  controller: _codeController,
+                  keyboardType: TextInputType.number,
+                  maxLength: 6,
+                  style: const TextStyle(
+                    color: AppColors.primary,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 22,
+                    letterSpacing: 8,
+                  ),
+                  textAlign: TextAlign.center,
+                  decoration: InputDecoration(
+                    hintText: '123456',
+                    hintStyle: const TextStyle(
+                      color: AppColors.textSub,
+                      fontSize: 22,
+                      letterSpacing: 8,
+                    ),
+                    counterText: '',
+                    filled: true,
+                    fillColor: AppColors.card,
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      borderSide: const BorderSide(
+                        color: AppColors.border,
+                      ),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      borderSide: const BorderSide(
+                        color: AppColors.primary,
+                        width: 1.5,
+                      ),
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 20),
+
+                ElevatedButton(
+                  onPressed: _isLoading ? null : _handleVerifyOtp,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.black,
+                    elevation: 0,
+                    padding: const EdgeInsets.symmetric(
+                      vertical: 16,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                  ),
+                  child: _isLoading
+                      ? const SizedBox(
+                    height: 20,
+                    width: 20,
+                    child: CircularProgressIndicator(
+                      color: Colors.black,
+                      strokeWidth: 2,
+                    ),
+                  )
+                      : const Text(
+                    'Xác Minh & Đăng Nhập',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 16),
+
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    TextButton(
+                      onPressed: () {
+                        setState(() => _step = 1);
+                      },
+                      child: const Text(
+                        'Đổi Email khác',
+                        style: TextStyle(color: AppColors.textSub, fontSize: 13),
+                      ),
+                    ),
+
+                    TextButton(
+                      onPressed: (_timerSeconds > 0 || _isLoading)
+                          ? null
+                          : _handleRequestOtp,
+                      child: Text(
+                        _timerSeconds > 0
+                            ? 'Gửi lại mã (${_timerSeconds}s)'
+                            : 'Gửi lại mã OTP',
+                        style: TextStyle(
+                          color: _timerSeconds > 0 ? AppColors.textSub : AppColors.primary,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
             ],
           ),
         ),

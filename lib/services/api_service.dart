@@ -252,6 +252,60 @@ class ApiService {
     }
   }
 
+  Future<Map<String, dynamic>> requestOtp({required String email}) async {
+    final base = await baseUrl;
+    final uri = Uri.parse('$base/auth/otp/request');
+
+    try {
+      final response = await _client
+          .post(
+            uri,
+            headers: await _headers(withAuth: false),
+            body: jsonEncode({
+              'email': email.trim().toLowerCase(),
+            }),
+          )
+          .timeout(const Duration(seconds: 15));
+
+      final data = _processResponse(response);
+      return data is Map<String, dynamic> ? data : {};
+    } on SocketException {
+      throw ApiException('Không thể kết nối máy chủ ($base). Hãy kiểm tra lại kết nối mạng.');
+    } catch (e) {
+      if (e is ApiException) rethrow;
+      throw ApiException('Lỗi yêu cầu mã OTP: $e');
+    }
+  }
+
+  Future<Map<String, dynamic>> verifyOtp({required String email, required String code}) async {
+    final base = await baseUrl;
+    final uri = Uri.parse('$base/auth/otp/verify');
+
+    try {
+      final response = await _client
+          .post(
+            uri,
+            headers: await _headers(withAuth: false),
+            body: jsonEncode({
+              'email': email.trim().toLowerCase(),
+              'code': code.trim(),
+            }),
+          )
+          .timeout(const Duration(seconds: 15));
+
+      final data = _processResponse(response) as Map<String, dynamic>;
+      if (data.containsKey('accessToken')) {
+        await saveToken(data['accessToken'].toString());
+      }
+      return data;
+    } on SocketException {
+      throw ApiException('Không thể kết nối máy chủ ($base). Hãy kiểm tra lại kết nối mạng.');
+    } catch (e) {
+      if (e is ApiException) rethrow;
+      throw ApiException('Lỗi xác minh mã OTP: $e');
+    }
+  }
+
   Future<Map<String, dynamic>> getProfile() async {
     final base = await baseUrl;
     final uri = Uri.parse('$base/auth/me');

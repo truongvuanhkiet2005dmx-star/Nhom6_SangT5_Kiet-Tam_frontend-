@@ -575,6 +575,49 @@ class DatabaseHelper {
     };
   }
 
+  Future<Map<String, dynamic>> findOrCreateUserByEmail({
+    required String email,
+    String? displayName,
+  }) async {
+    final db = await instance.database;
+    final normalizedEmail = email.trim().toLowerCase();
+
+    final result = await db.query(
+      'users',
+      where: 'username = ?',
+      whereArgs: [normalizedEmail],
+      limit: 1,
+    );
+
+    int userId;
+    if (result.isNotEmpty) {
+      return result.first;
+    } else {
+      userId = await db.insert('users', {
+        'username': normalizedEmail,
+        'firebaseUid': null,
+        'password': null,
+        'salt': null,
+      });
+
+      await db.insert('wallets', {
+        'userId': userId,
+        'name': 'Ví VietinBank',
+        'balance': 0,
+        'initialBalance': 0,
+        'type': 'bank',
+        'accountNumber': '',
+        'clientId': generateUuid(),
+      });
+    }
+
+    final user = await getUserById(userId);
+    return user ?? {
+      'id': userId,
+      'username': normalizedEmail,
+    };
+  }
+
   Future<Map<String, dynamic>?> getUserById(int userId) async {
     final db = await instance.database;
 
