@@ -409,6 +409,8 @@ class _AddTransactionScreenState
 
     try {
       final db = await DatabaseHelper.instance.database;
+      final prefs = await SharedPreferences.getInstance();
+      final activeFamilyGroupId = prefs.getInt('activeFamilyGroupId');
 
       int insertedId = 0;
       final String generatedEventId = DatabaseHelper.instance.generateUuid();
@@ -483,6 +485,7 @@ class _AddTransactionScreenState
             'userId': _userId,
             'walletId': _selectedWalletId,
             'toWalletId': _tabIndex == 2 ? _selectedToWalletId : null,
+            'familyGroupId': activeFamilyGroupId,
             'amount': amount,
             'type': typeStr,
             'isExpense': isExpenseVal,
@@ -504,6 +507,7 @@ class _AddTransactionScreenState
           'type': _tabIndex == 0 ? 'expense' : (_tabIndex == 1 ? 'income' : 'transfer'),
           'walletId': _selectedWalletId,
           'toWalletId': _tabIndex == 2 ? _selectedToWalletId : null,
+          'familyGroupId': activeFamilyGroupId,
           'walletName': _selectedWallet,
           'bankName': _selectedWallet,
           'packageName': '',

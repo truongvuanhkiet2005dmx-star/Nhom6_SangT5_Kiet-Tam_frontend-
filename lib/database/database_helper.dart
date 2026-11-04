@@ -31,7 +31,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 11,
+      version: 12,
       onCreate: _createDB,
       onUpgrade: _onUpgrade,
     );
@@ -122,6 +122,7 @@ class DatabaseHelper {
         userId INTEGER NOT NULL,
         walletId INTEGER,
         toWalletId INTEGER,
+        familyGroupId INTEGER,
         amount INTEGER NOT NULL,
         type TEXT NOT NULL,
         adjustmentDirection TEXT,
@@ -408,6 +409,17 @@ class DatabaseHelper {
         }
       } catch (e) {
         debugPrint("[DatabaseHelper] Migration v11 warning: $e");
+      }
+    }
+
+    if (oldVersion < 12) {
+      try {
+        await db.execute('''
+          ALTER TABLE transactions
+          ADD COLUMN familyGroupId INTEGER
+        ''');
+      } catch (e) {
+        debugPrint("[DatabaseHelper] Migration v12 warning: $e");
       }
     }
   }
@@ -1085,6 +1097,7 @@ class DatabaseHelper {
     final db = await instance.database;
     final serverId = (remoteTx['id'] ?? remoteTx['transactionId']) as int?;
     final eventId = remoteTx['eventId']?.toString();
+    final familyGroupId = (remoteTx['familyGroupId'] as num?)?.toInt();
     final amount = (remoteTx['amount'] as num?)?.toInt().abs() ?? 0;
     final type = remoteTx['type']?.toString() ?? 'expense';
     final adjustmentDirection = remoteTx['adjustmentDirection']?.toString();
@@ -1121,6 +1134,7 @@ class DatabaseHelper {
             'serverId': serverId,
             'amount': amount,
             'type': type,
+            if (familyGroupId != null) 'familyGroupId': familyGroupId,
             if (adjustmentDirection != null) 'adjustmentDirection': adjustmentDirection,
             'isExpense': isExpense,
             'categoryName': categoryName,
@@ -1152,6 +1166,7 @@ class DatabaseHelper {
           {
             'amount': amount,
             'type': type,
+            if (familyGroupId != null) 'familyGroupId': familyGroupId,
             if (adjustmentDirection != null) 'adjustmentDirection': adjustmentDirection,
             'isExpense': isExpense,
             'categoryName': categoryName,
@@ -1174,6 +1189,7 @@ class DatabaseHelper {
       'userId': localUserId,
       'walletId': localWalletId,
       'toWalletId': localToWalletId,
+      'familyGroupId': familyGroupId,
       'amount': amount,
       'type': type,
       'adjustmentDirection': adjustmentDirection,

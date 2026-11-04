@@ -72,7 +72,7 @@ class SyncService {
       }
 
       final prefs = await SharedPreferences.getInstance();
-      final familyGroupId = prefs.getInt('activeFamilyGroupId');
+      final int? familyGroupId = (tx['familyGroupId'] as num?)?.toInt() ?? prefs.getInt('activeFamilyGroupId');
 
       String type = tx['type']?.toString() ?? (tx['isExpense'] == 1 ? 'expense' : 'income');
       final String? adjustmentDirection = tx['adjustmentDirection']?.toString() ??

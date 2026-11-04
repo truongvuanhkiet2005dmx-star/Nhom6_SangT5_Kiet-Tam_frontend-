@@ -89,11 +89,21 @@ class ApiService {
     }
 
     if (statusCode == 401) {
-      clearToken();
-      throw ApiException(
-        'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.',
-        statusCode: 401,
-      );
+      final uriStr = response.request?.url.toString() ?? '';
+      final isPublicAuth = uriStr.contains('/auth/login') ||
+          uriStr.contains('/auth/register') ||
+          uriStr.contains('/auth/otp/');
+      if (!isPublicAuth) {
+        clearToken();
+      }
+
+      String message = 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.';
+      if (parsedBody is Map && parsedBody.containsKey('detail') && parsedBody['detail'] != null && parsedBody['detail'].toString().isNotEmpty) {
+        message = parsedBody['detail'].toString();
+      } else if (parsedBody is Map && parsedBody.containsKey('message') && parsedBody['message'] != null && parsedBody['message'].toString().isNotEmpty) {
+        message = parsedBody['message'].toString();
+      }
+      throw ApiException(message, statusCode: 401);
     }
 
     if (statusCode == 429) {
@@ -288,14 +298,15 @@ class ApiService {
             headers: await _headers(withAuth: false),
             body: jsonEncode({
               'email': email.trim().toLowerCase(),
-              'code': code.trim(),
+              'otp': code.trim(),
             }),
           )
           .timeout(const Duration(seconds: 15));
 
       final data = _processResponse(response) as Map<String, dynamic>;
-      if (data.containsKey('accessToken')) {
-        await saveToken(data['accessToken'].toString());
+      final token = data['accessToken']?.toString();
+      if (token != null && token.isNotEmpty) {
+        await saveToken(token);
       }
       return data;
     } on SocketException {

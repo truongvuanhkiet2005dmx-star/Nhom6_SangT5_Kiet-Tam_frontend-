@@ -7,11 +7,23 @@ class AppConstants {
   // API Base URL cho ASP.NET Core Backend (Port 5087, HTTP)
   static const String _envBackendUrl = String.fromEnvironment('BACKEND_URL');
 
-  static const String _demoBackendUrl = 'https://encroach-perfume-clasp.ngrok-free.dev/api';
+  static String get defaultBackendBaseUrl {
+    if (kIsWeb) return 'http://localhost:5087/api';
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.android:
+        return 'http://10.0.2.2:5087/api';
+      case TargetPlatform.windows:
+      case TargetPlatform.macOS:
+      case TargetPlatform.linux:
+      case TargetPlatform.iOS:
+      default:
+        return 'http://localhost:5087/api';
+    }
+  }
 
   static String get backendBaseUrl {
     if (_envBackendUrl.isNotEmpty) return _envBackendUrl;
-    return _demoBackendUrl;
+    return defaultBackendBaseUrl;
   }
 
   static const List<String> allowedBankPackages = [
