@@ -28,9 +28,10 @@ class AutoTransactionService {
       return;
     }
     _isInitializing = true;
+    final swInit = Stopwatch()..start();
 
     try {
-      final smsStatus = await Permission.sms.request();
+      final smsStatus = await Permission.sms.status;
 
       if (smsStatus.isGranted) {
         telephony.listenIncomingSms(
@@ -41,6 +42,17 @@ class AutoTransactionService {
         );
       }
 
+      // 1. Call NotificationsListener.initialize FIRST
+      await NotificationsListener.initialize(
+        callbackHandle: notificationCallbackHandle,
+      );
+
+      // 2. Register receivePort listener SECOND
+      NotificationsListener.receivePort?.listen((evt) {
+        handleNotificationEvent(evt);
+      });
+
+      // 3. Check permission and call startService THIRD
       bool? isGranted = await NotificationsListener.hasPermission;
       if (isGranted == true) {
         await NotificationsListener.startService();
@@ -48,19 +60,13 @@ class AutoTransactionService {
         debugPrint("[AutoTransactionService] Notification Listener Permission not granted.");
       }
 
-      await NotificationsListener.initialize(
-        callbackHandle: notificationCallbackHandle,
-      );
-
-      NotificationsListener.receivePort?.listen((evt) {
-        handleNotificationEvent(evt);
-      });
-
       _initialized = true;
     } catch (e) {
       _initialized = false;
       debugPrint("Error initializing AutoTransactionService: $e");
     } finally {
+      swInit.stop();
+      debugPrint("[Performance] AutoTransactionService.initialize completed in ${swInit.elapsedMilliseconds}ms");
       _isInitializing = false;
     }
   }
@@ -326,10 +332,6 @@ class AutoTransactionService {
         'accountNumber': extractedStk ?? '',
         'clientId': newClientId,
       });
-
-      try {
-        await SyncService.instance.syncUnsyncedWallets(activeUserId);
-      } catch (_) {}
 
       final createdWallet = await DatabaseHelper.instance.getWalletById(newWalletId);
       matchedWallet = createdWallet ?? {

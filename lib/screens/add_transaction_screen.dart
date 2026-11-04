@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -499,42 +500,43 @@ class _AddTransactionScreenState
         );
       });
 
-      bool isSyncedSuccess = false;
-      try {
-        final txData = {
-          'id': insertedId,
-          'eventId': generatedEventId,
-          'amount': amount,
-          'type': _tabIndex == 0 ? 'expense' : (_tabIndex == 1 ? 'income' : 'transfer'),
-          'walletId': _selectedWalletId,
-          'toWalletId': _tabIndex == 2 ? _selectedToWalletId : null,
-          'familyGroupId': activeFamilyGroupId,
-          'walletName': _selectedWallet,
-          'bankName': _selectedWallet,
-          'packageName': '',
-          'categoryName': _tabIndex == 2 ? 'Chuyển khoản' : _selectedCategory,
-          'date': _selectedDate.toIso8601String(),
-          'note': _note,
-        };
-        isSyncedSuccess = await SyncService.instance.syncTransaction(txData);
-      } catch (e) {
-        debugPrint("Manual tx sync error: $e");
-      }
+      AutoTransactionService.instance.onTransactionAdded.add(true);
 
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(isSyncedSuccess
-              ? 'Đã lưu & đồng bộ thành công!'
-              : 'Đã lưu cục bộ, đang chờ đồng bộ server...'),
-          backgroundColor: isSyncedSuccess ? Colors.green : Colors.orange,
+        const SnackBar(
+          content: Text('Đã lưu giao dịch thành công!'),
+          backgroundColor: Colors.green,
+          duration: Duration(seconds: 2),
         ),
       );
 
-      AutoTransactionService.instance.onTransactionAdded.add(true);
-
       Navigator.pop(context, true);
+
+      // Async background network sync so UI pops instantly (< 10ms)
+      unawaited(Future.microtask(() async {
+        try {
+          final txData = {
+            'id': insertedId,
+            'eventId': generatedEventId,
+            'amount': amount,
+            'type': _tabIndex == 0 ? 'expense' : (_tabIndex == 1 ? 'income' : 'transfer'),
+            'walletId': _selectedWalletId,
+            'toWalletId': _tabIndex == 2 ? _selectedToWalletId : null,
+            'familyGroupId': activeFamilyGroupId,
+            'walletName': _selectedWallet,
+            'bankName': _selectedWallet,
+            'packageName': '',
+            'categoryName': _tabIndex == 2 ? 'Chuyển khoản' : _selectedCategory,
+            'date': _selectedDate.toIso8601String(),
+            'note': _note,
+          };
+          await SyncService.instance.syncTransaction(txData);
+        } catch (e) {
+          debugPrint("Manual tx background sync error: $e");
+        }
+      }));
     } catch (e) {
       if (!mounted) return;
       final errorStr = e.toString().replaceAll('Exception: ', '').trim();

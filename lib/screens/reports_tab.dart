@@ -19,6 +19,9 @@ class _ReportsTabState extends State<ReportsTab> {
   int _selectedYear = DateTime.now().year;
   bool _isLoading = true;
 
+  bool _isFetchingBackend = false;
+  bool _needsReload = false;
+
   int _totalAmount = 0;
   int _monthlyBudget = 10000000;
   Map<String, int> _categoryTotals = {};
@@ -33,9 +36,17 @@ class _ReportsTabState extends State<ReportsTab> {
 
     _autoTxSub = AutoTransactionService.instance.onTransactionAdded.stream.listen((_) {
       if (mounted) {
-        _loadReports();
+        _onAutoTxAdded();
       }
     });
+  }
+
+  void _onAutoTxAdded() {
+    if (_isFetchingBackend) {
+      _needsReload = true;
+      return;
+    }
+    _loadReports();
   }
 
   @override
@@ -45,11 +56,20 @@ class _ReportsTabState extends State<ReportsTab> {
   }
 
   Future<void> _loadReports() async {
+    if (_isFetchingBackend) {
+      _needsReload = true;
+      return;
+    }
+
+    _isFetchingBackend = true;
+    _needsReload = false;
     final currentReqId = ++_reportRequestId;
 
-    setState(() {
-      _isLoading = true;
-    });
+    if (mounted) {
+      setState(() {
+        _isLoading = true;
+      });
+    }
 
     final prefs = await SharedPreferences.getInstance();
     final userId = prefs.getInt('userId');
@@ -146,13 +166,22 @@ class _ReportsTabState extends State<ReportsTab> {
     }
 
     // Đảm bảo không ghi đè nếu người dùng đã chuyển tab khác trong khi chờ async
-    if (!mounted || currentReqId != _reportRequestId) return;
+    if (!mounted || currentReqId != _reportRequestId) {
+      _isFetchingBackend = false;
+      return;
+    }
 
     setState(() {
       _totalAmount = total;
       _categoryTotals = categories;
       _isLoading = false;
     });
+
+    _isFetchingBackend = false;
+    if (_needsReload && mounted) {
+      _needsReload = false;
+      _loadReports();
+    }
   }
 
   String _formatMoney(int amount) {
