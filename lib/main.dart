@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:intl/date_symbol_data_local.dart';
@@ -11,46 +12,49 @@ import 'screens/main_navigation_screen.dart';
 import 'services/api_service.dart';
 import 'services/notification_service.dart';
 
-void main() async {
-  final swMain = Stopwatch()..start();
+void main() {
   WidgetsFlutterBinding.ensureInitialized();
 
-  try {
-    await Firebase.initializeApp();
-    // FCM Push Handler dành riêng cho Push Notifications từ C# Backend
-    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-      final notification = message.notification;
-      if (notification != null) {
-        NotificationService.instance.showNotification(
-          notification.title ?? 'SmartMoney',
-          notification.body ?? '',
-        );
-      }
-    });
-
-    FirebaseMessaging.instance.onTokenRefresh.listen((newToken) {
-      ApiService.instance.registerDeviceToken(newToken);
-    });
-  } catch (e) {
-    debugPrint("[main] Firebase/FCM chưa được cấu hình hoặc bị lỗi: $e");
-  }
-
-  try {
-    await initializeDateFormatting('vi_VN', null);
-  } catch (e) {
-    debugPrint("Error initializing date formatting: $e");
-  }
-
-  try {
-    await NotificationService.instance.initialize();
-  } catch (e) {
-    debugPrint("Error initializing NotificationService: $e");
-  }
-
-  swMain.stop();
-  debugPrint("[Performance] main() setup completed in ${swMain.elapsedMilliseconds}ms");
-
   runApp(const SmartMoneyApp());
+
+  // Non-blocking background initialization after runApp to ensure instant first frame render
+  unawaited(Future.microtask(() async {
+    final swMain = Stopwatch()..start();
+
+    try {
+      await Firebase.initializeApp();
+      FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+        final notification = message.notification;
+        if (notification != null) {
+          NotificationService.instance.showNotification(
+            notification.title ?? 'SmartMoney',
+            notification.body ?? '',
+          );
+        }
+      });
+
+      FirebaseMessaging.instance.onTokenRefresh.listen((newToken) {
+        ApiService.instance.registerDeviceToken(newToken);
+      });
+    } catch (e) {
+      debugPrint("[main] Firebase/FCM background init warning: $e");
+    }
+
+    try {
+      await initializeDateFormatting('vi_VN', null);
+    } catch (e) {
+      debugPrint("Error initializing date formatting: $e");
+    }
+
+    try {
+      await NotificationService.instance.initialize();
+    } catch (e) {
+      debugPrint("Error initializing NotificationService: $e");
+    }
+
+    swMain.stop();
+    debugPrint("[Performance] Background main() setup completed in ${swMain.elapsedMilliseconds}ms");
+  }));
 }
 
 class SmartMoneyApp extends StatefulWidget {
