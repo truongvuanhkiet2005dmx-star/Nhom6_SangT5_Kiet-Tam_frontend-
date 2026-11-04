@@ -411,6 +411,7 @@ class _AddTransactionScreenState
       final db = await DatabaseHelper.instance.database;
 
       int insertedId = 0;
+      final String generatedEventId = DatabaseHelper.instance.generateUuid();
       await db.transaction((txn) async {
         final fromWallet = await txn.query(
           'wallets',
@@ -475,8 +476,6 @@ class _AddTransactionScreenState
           typeStr = 'transfer';
           isExpenseVal = 0;
         }
-
-        final generatedEventId = DatabaseHelper.instance.generateUuid();
 
         insertedId = await txn.insert(
           'transactions',
