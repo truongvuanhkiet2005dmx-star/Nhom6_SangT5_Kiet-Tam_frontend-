@@ -165,13 +165,13 @@ class BankMessageParser {
     }
 
     // Extract transaction amount from GD: / PS: / amount pattern
-    final gdMatch = RegExp(r'(?:GD|PS|So\s*tien|Số\s*tiền)\s*[:=]?\s*([+-]?\d{1,3}(?:[.,]\d{3})+|[+-]?\d+)\s*(?:VND|đ|VNĐ|d|k\b)', caseSensitive: false).firstMatch(content);
+    final gdMatch = RegExp(r'(?:GD|PS|So\s*tien|Số\s*tiền)\s*[:=]?\s*([+-]?\d+(?:[.,]\d+)?\s*(?:k\b|nghìn|ngàn|VND|đ|VNĐ|d)?)', caseSensitive: false).firstMatch(content);
     String? rawAmountStr;
     if (gdMatch != null) {
       rawAmountStr = gdMatch.group(1);
     } else {
       // Fallback regex for signed or unsigned amount
-      final generalAmtMatch = RegExp(r'([+-]\s*\d{1,3}(?:[.,]\d{3})+|[+-]\s*\d+)\s*(?:VND|đ|VNĐ|d)', caseSensitive: false).firstMatch(content);
+      final generalAmtMatch = RegExp(r'([+-]\s*\d+(?:[.,]\d+)?\s*(?:k\b|nghìn|ngàn|VND|đ|VNĐ|d)?)', caseSensitive: false).firstMatch(content);
       if (generalAmtMatch != null) {
         rawAmountStr = generalAmtMatch.group(1);
       }
@@ -182,8 +182,15 @@ class BankMessageParser {
       return null;
     }
 
+    final lowerRaw = rawAmountStr.toLowerCase();
+    final isK = lowerRaw.contains('k') || lowerRaw.contains('nghìn') || lowerRaw.contains('ngàn');
+
     final cleanedAmtStr = rawAmountStr.replaceAll(RegExp(r'[^\d]'), '');
-    final amount = int.tryParse(cleanedAmtStr) ?? 0;
+    int amount = int.tryParse(cleanedAmtStr) ?? 0;
+    if (isK) {
+      amount = amount * 1000;
+    }
+
     if (amount < 1000) return null;
 
     bool isIncome = rawAmountStr.contains('+') ||

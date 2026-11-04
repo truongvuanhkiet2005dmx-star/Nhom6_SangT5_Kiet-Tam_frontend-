@@ -30,12 +30,9 @@ class AutoTransactionService {
     _isInitializing = true;
 
     try {
-      Map<Permission, PermissionStatus> statuses = await [
-        Permission.sms,
-        Permission.phone,
-      ].request();
+      final smsStatus = await Permission.sms.request();
 
-      if (statuses[Permission.sms]!.isGranted) {
+      if (smsStatus.isGranted) {
         telephony.listenIncomingSms(
           onNewMessage: (SmsMessage message) {
             processSmsContent(message.body ?? '');
@@ -316,12 +313,14 @@ class AutoTransactionService {
 
     List<Map<String, dynamic>> wallets = await DatabaseHelper.instance.getWallets(activeUserId);
     Map<String, dynamic>? matchedWallet = findMatchingWallet(wallets, rawContent, extractedStk);
+    bool isNewWallet = false;
 
     if (matchedWallet == null) {
+      isNewWallet = true;
       final newClientId = DatabaseHelper.instance.generateUuid();
       final initBal = parsedAccountBalance != null
           ? (isExpense ? parsedAccountBalance + amount : parsedAccountBalance - amount)
-          : (isExpense ? 0 : amount);
+          : 0;
       final finalBal = parsedAccountBalance ?? (isExpense ? 0 : amount);
       final walletTitle = 'Ví $detectedBankName';
 
@@ -361,14 +360,15 @@ class AutoTransactionService {
 
     final generatedEventId = DatabaseHelper.instance.generateUuid();
 
+    // Calculate expected balance & audit adjustment ONLY for existing wallets
     final expectedBalanceAfterTx = isExpense ? (currentBalance - amount) : (currentBalance + amount);
     int? adjustmentDelta;
-    if (parsedAccountBalance != null && currentBalance > 0 && parsedAccountBalance != expectedBalanceAfterTx) {
+    if (!isNewWallet && parsedAccountBalance != null && currentBalance > 0 && parsedAccountBalance != expectedBalanceAfterTx) {
       adjustmentDelta = parsedAccountBalance - expectedBalanceAfterTx;
     }
 
     int insertedTxId = 0;
-    int finalWalletBalance = parsedAccountBalance ?? expectedBalanceAfterTx;
+    int finalWalletBalance = parsedAccountBalance ?? (isNewWallet ? (isExpense ? 0 : amount) : expectedBalanceAfterTx);
 
     await db.transaction((txn) async {
       if (adjustmentDelta != null && adjustmentDelta != 0) {

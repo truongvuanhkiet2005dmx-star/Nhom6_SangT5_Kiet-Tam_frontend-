@@ -49,8 +49,8 @@ class _InitialWalletSetupScreenState
   }
 
   Future<void> _saveWallets() async {
-    final cash = _parseMoney(_cashController.text);
-    final bank = _parseMoney(_bankController.text);
+    final cashText = _cashController.text.trim();
+    final bankText = _bankController.text.trim();
     final accNum = _accountNumberController.text.trim();
 
     setState(() {
@@ -60,33 +60,46 @@ class _InitialWalletSetupScreenState
     try {
       final existingWallets = await DatabaseHelper.instance.getWallets(widget.userId);
 
-      // F5/F13 Fix: Cập nhật ví hiện có, tự động giữ lại STK cũ nếu ô nhập mới để trống
+      // 1. Cập nhật / tạo ví Tiền Mặt
       final existingCash = existingWallets.where((w) => w['type'] == 'cash').firstOrNull;
       if (existingCash != null) {
-        await DatabaseHelper.instance.updateWalletBalance(existingCash['id'] as int, cash);
+        if (cashText.isNotEmpty) {
+          final cashVal = _parseMoney(cashText);
+          await DatabaseHelper.instance.updateWalletBalance(existingCash['id'] as int, cashVal);
+        }
       } else {
+        final cashVal = cashText.isNotEmpty ? _parseMoney(cashText) : 0;
         await DatabaseHelper.instance.insertWallet({
           'userId': widget.userId,
           'name': 'Ví tiền mặt',
-          'balance': cash,
+          'balance': cashVal,
+          'initialBalance': cashVal,
           'type': 'cash',
         });
       }
 
+      // 2. Cập nhật / tạo ví Ngân Hàng (chỉ tạo ví mới nếu đã điền số dư hoặc STK)
       final existingBank = existingWallets.where((w) => w['type'] == 'bank').firstOrNull;
       if (existingBank != null) {
         final currentAccNum = existingBank['accountNumber']?.toString() ?? '';
         final finalAccNum = accNum.isNotEmpty ? accNum : currentAccNum;
+        final currentName = existingBank['name']?.toString() ?? _selectedBank;
+        final finalName = bankText.isNotEmpty ? _selectedBank : currentName;
+        final currentBal = (existingBank['balance'] as num?)?.toInt() ?? 0;
+        final finalBal = bankText.isNotEmpty ? _parseMoney(bankText) : currentBal;
+
         await DatabaseHelper.instance.updateWallet(existingBank['id'] as int, {
-          'name': _selectedBank,
-          'balance': bank,
+          'name': finalName,
+          'balance': finalBal,
           'accountNumber': finalAccNum,
         });
-      } else {
+      } else if (bankText.isNotEmpty || accNum.isNotEmpty) {
+        final bankVal = bankText.isNotEmpty ? _parseMoney(bankText) : 0;
         await DatabaseHelper.instance.insertWallet({
           'userId': widget.userId,
           'name': _selectedBank,
-          'balance': bank,
+          'balance': bankVal,
+          'initialBalance': bankVal,
           'type': 'bank',
           'accountNumber': accNum.isEmpty ? null : accNum,
         });

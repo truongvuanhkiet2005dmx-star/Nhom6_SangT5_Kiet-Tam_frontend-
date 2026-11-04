@@ -1,4 +1,6 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:local_auth/local_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -82,6 +84,39 @@ class _ProfileTabState extends State<ProfileTab> {
   }
 
   Future<void> _setBiometric(bool value) async {
+    if (value) {
+      final localAuth = LocalAuthentication();
+      try {
+        bool canCheck = await localAuth.canCheckBiometrics || await localAuth.isDeviceSupported();
+        if (!canCheck) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Thiết bị của bạn không hỗ trợ hoặc chưa đăng ký Vân tay / FaceID!'), backgroundColor: Colors.orange),
+          );
+          return;
+        }
+
+        bool authenticated = await localAuth.authenticate(
+          localizedReason: 'Xác thực sinh trắc học để bật bảo mật ứng dụng',
+          options: const AuthenticationOptions(biometricOnly: true, stickyAuth: true),
+        );
+
+        if (!authenticated) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Xác thực thất bại!'), backgroundColor: Colors.red),
+          );
+          return;
+        }
+      } catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Lỗi xác thực sinh trắc học: $e'), backgroundColor: Colors.red),
+        );
+        return;
+      }
+    }
+
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('biometricEnabled', value);
     if (!mounted) return;
@@ -588,13 +623,15 @@ class _ProfileTabState extends State<ProfileTab> {
                   color: Colors.indigoAccent,
                   onTap: _showChangePasswordDialog,
                 ),
-                _buildDivider(),
-                _buildMenuItem(
-                  icon: Icons.notifications_active_outlined,
-                  title: 'Quyền đọc Thông báo App Ngân hàng',
-                  color: Colors.amber,
-                  onTap: _openNotificationPermissionSettings,
-                ),
+                if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) ...[
+                  _buildDivider(),
+                  _buildMenuItem(
+                    icon: Icons.notifications_active_outlined,
+                    title: 'Quyền đọc Thông báo App Ngân hàng',
+                    color: Colors.amber,
+                    onTap: _openNotificationPermissionSettings,
+                  ),
+                ],
                 _buildDivider(),
                 ListTile(
                   leading: const Icon(Icons.alarm, color: Colors.purpleAccent),

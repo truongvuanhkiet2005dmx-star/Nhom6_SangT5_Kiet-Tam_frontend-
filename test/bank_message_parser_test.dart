@@ -108,5 +108,19 @@ ND:thanh toán mua sắm, REQ_ID 155158452425''';
       expect(result.refId, equals('155158452425'));
       expect(result.displayNote, equals('thanh toán mua sắm, REQ_ID 155158452425'));
     });
+
+    test('8. Shorthand 50k Amount Pattern', () {
+      const sample = 'MBBank: TK 1012345678 GD: -50k VND SDC: 1,500,000 VND ND: mua ca phe REQ_ID 998877';
+
+      final result = BankMessageParser.parse(sample);
+
+      expect(result, isNotNull);
+      expect(result!.bankName, equals('MBBank'));
+      expect(result.accountNumber, equals('1012345678'));
+      expect(result.amount, equals(50000));
+      expect(result.isExpense, isTrue);
+      expect(result.endingBalance, equals(1500000));
+      expect(result.refId, equals('998877'));
+    });
   });
 }
