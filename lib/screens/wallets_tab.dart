@@ -628,6 +628,7 @@ class _EditWalletDialogState extends State<_EditWalletDialog> {
                 'walletId': walletId,
                 'amount': diff.abs(),
                 'type': 'adjustment',
+                'adjustmentDirection': direction,
                 'isExpense': diff < 0 ? 1 : 0,
                 'categoryName': 'Điều chỉnh số dư',
                 'date': DateTime.now().toIso8601String(),

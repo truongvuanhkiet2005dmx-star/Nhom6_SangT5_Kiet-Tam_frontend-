@@ -982,7 +982,7 @@ class DatabaseHelper {
     final amount = (remoteTx['amount'] as num?)?.toInt().abs() ?? 0;
     final type = remoteTx['type']?.toString() ?? 'expense';
     final adjustmentDirection = remoteTx['adjustmentDirection']?.toString();
-    final isExpense = type == 'income' ? 0 : 1;
+    final isExpense = (type == 'expense' || (type == 'adjustment' && adjustmentDirection == 'decrease')) ? 1 : 0;
     final categoryName = remoteTx['categoryName']?.toString() ?? 'Khác';
     final date = remoteTx['occurredAtUtc']?.toString() ?? remoteTx['occurredAt']?.toString() ?? DateTime.now().toUtc().toIso8601String();
     final note = remoteTx['note']?.toString() ?? '';

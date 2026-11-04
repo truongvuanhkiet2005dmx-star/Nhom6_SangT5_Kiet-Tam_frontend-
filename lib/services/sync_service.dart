@@ -74,6 +74,8 @@ class SyncService {
       final familyGroupId = prefs.getInt('activeFamilyGroupId');
 
       String type = tx['type']?.toString() ?? (tx['isExpense'] == 1 ? 'expense' : 'income');
+      final String? adjustmentDirection = tx['adjustmentDirection']?.toString() ??
+          (type == 'adjustment' ? (tx['isExpense'] == 1 ? 'decrease' : 'increase') : null);
 
       final String source = tx['walletName']?.toString() ?? 'Ví tài khoản';
       final String bankName = tx['bankName']?.toString() ?? source;
@@ -139,9 +141,7 @@ class SyncService {
         'note': note,
       };
 
-      if (tx.containsKey('adjustmentDirection') && tx['adjustmentDirection'] != null) {
-        payload['adjustmentDirection'] = tx['adjustmentDirection'];
-      }
+      if (adjustmentDirection != null) payload['adjustmentDirection'] = adjustmentDirection;
 
       if (serverWalletId != null && serverWalletId > 0) {
         payload['walletId'] = serverWalletId;
