@@ -105,10 +105,11 @@ class _ProfileTabState extends State<ProfileTab> {
       if (!isGranted) {
         await NativeListenerBridge.openNotificationPermissionSettings();
       } else {
+        await NativeListenerBridge.startService();
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('SmartMoney đã có quyền đọc Thông báo App Ngân hàng!'),
+            content: Text('SmartMoney đã có quyền đọc Thông báo App Ngân hàng! Dịch vụ đã sẵn sàng.'),
             backgroundColor: Colors.green,
           ),
         );

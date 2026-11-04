@@ -28,6 +28,20 @@ class NativeListenerBridge {
       if (callbackHandle is Function) {
         await NotificationsListener.initialize(callbackHandle: callbackHandle as EventCallbackFunc);
       }
+      bool? isGranted = await NotificationsListener.hasPermission;
+      if (isGranted == true) {
+        await NotificationsListener.startService();
+      }
+    } catch (_) {}
+  }
+
+  static Future<void> startService() async {
+    if (kIsWeb || !Platform.isAndroid) return;
+    try {
+      bool? isGranted = await NotificationsListener.hasPermission;
+      if (isGranted == true) {
+        await NotificationsListener.startService();
+      }
     } catch (_) {}
   }
 

@@ -6,6 +6,7 @@ import 'package:permission_handler/permission_handler.dart';
 import '../core/app_colors.dart';
 import '../core/voice_parser_util.dart';
 import '../services/auto_transaction_service.dart';
+import '../services/native_listener_bridge.dart';
 import 'home_tab.dart';
 import 'reports_tab.dart';
 import 'wallets_tab.dart';
@@ -22,7 +23,7 @@ class MainNavigationScreen extends StatefulWidget {
 }
 
 class _MainNavigationScreenState
-    extends State<MainNavigationScreen> {
+    extends State<MainNavigationScreen> with WidgetsBindingObserver {
   int _currentIndex = 0;
 
   final stt.SpeechToText _speech = stt.SpeechToText();
@@ -35,7 +36,21 @@ class _MainNavigationScreenState
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     AutoTransactionService.instance.initialize();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      NativeListenerBridge.startService();
+    }
   }
 
   late final List<Widget> _screens = const [

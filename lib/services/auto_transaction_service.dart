@@ -8,6 +8,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../core/constants.dart';
 import '../database/database_helper.dart';
+import 'bank_message_parser.dart';
 import 'notification_service.dart';
 import 'sync_service.dart';
 
@@ -44,9 +45,10 @@ class AutoTransactionService {
       }
 
       bool? isGranted = await NotificationsListener.hasPermission;
-      if (isGranted != true) {
-        debugPrint("Notification Listener Permission not granted. Opening settings...");
-        await NotificationsListener.openPermissionSettings();
+      if (isGranted == true) {
+        await NotificationsListener.startService();
+      } else {
+        debugPrint("[AutoTransactionService] Notification Listener Permission not granted.");
       }
 
       await NotificationsListener.initialize(callbackHandle: notificationCallbackHandle);
@@ -132,7 +134,7 @@ class AutoTransactionService {
 
   String? extractAccountNumber(String content) {
     final stkRegex = RegExp(
-      r'(?:TK|STK|SDTK|Tai\s*khoan|So\s*TK|acc|account)\s*[:=]?\s*([0-9xX*]{4,16})',
+      r'(?:TK|STK|SDTK|Tai\s*khoan|So\s*TK|acc|account|TK VCB)\s*[:=]?\s*([0-9xX*]{6,16})',
       caseSensitive: false,
     );
 
@@ -152,6 +154,18 @@ class AutoTransactionService {
       if (stk.isNotEmpty) return stk;
     }
 
+    return null;
+  }
+
+  String? extractBankRefId(String content) {
+    final refRegex = RegExp(
+      r'(?:REQ_ID|Ref|Mã\s*GD|Ma\s*GD|RefNo|TraceNo)\s*[:=]?\s*([A-Za-z0-9_.-]{6,32})',
+      caseSensitive: false,
+    );
+    final match = refRegex.firstMatch(content);
+    if (match != null) {
+      return match.group(1)?.trim();
+    }
     return null;
   }
 
@@ -184,15 +198,15 @@ class AutoTransactionService {
     }
 
     final bankKeywords = {
+      'vietcombank': ['vietcombank', 'vcb'],
       'vietinbank': ['vietinbank', 'ctg', 'vietin', 'vietin bank', 'ipay'],
       'mbbank': ['mb', 'mbbank', 'mb bank', 'mcbank'],
-      'vcb': ['vcb', 'vietcombank'],
-      'tcb': ['tcb', 'techcombank'],
+      'techcombank': ['tcb', 'techcombank'],
       'bidv': ['bidv'],
-      'vpb': ['vpb', 'vpbank', 'vp bank'],
+      'vpbank': ['vpb', 'vpbank', 'vp bank'],
       'agribank': ['agribank', 'agri'],
       'acb': ['acb'],
-      'tpb': ['tpb', 'tpbank', 'tp bank'],
+      'tpbank': ['tpb', 'tpbank', 'tp bank'],
       'momo': ['momo'],
       'zalopay': ['zalopay', 'zalo'],
     };
@@ -213,23 +227,8 @@ class AutoTransactionService {
     return null;
   }
 
-  // F1 Fix: Đổi processSmsContent trả về Future<bool> thông báo thực tế xem có bóc tách & tạo giao dịch thành công không
   Future<bool> processSmsContent(String content, {bool force = false, String packageName = ''}) async {
     if (!force && (content.contains('SmartMoney') || content.contains('Chi tiêu tự động') || content.contains('Thu nhập tự động'))) {
-      return false;
-    }
-
-    String lowerContent = content.toLowerCase();
-
-    bool isBankMessage = lowerContent.contains('vnd') ||
-        lowerContent.contains('vnđ') ||
-        lowerContent.contains('đồng') ||
-        lowerContent.contains('so du') ||
-        lowerContent.contains('sodu') ||
-        lowerContent.contains('tai khoan') ||
-        RegExp(r'\b(?:tk|gd|ps|stk)\b', caseSensitive: false).hasMatch(content);
-
-    if (!isBankMessage) {
       return false;
     }
 
@@ -251,71 +250,19 @@ class AutoTransactionService {
       });
     }
 
-    String? extractedStk = extractAccountNumber(content);
-
-    int? parsedAccountBalance;
-    final balanceRegex = RegExp(
-      r'(?:so\s*du|sd|sdc|sodu)\s*[:=]?\s*([+-]?\d{1,3}(?:[.,]\d{3})+|[+-]?\d+)\s*(?:VND|đ|VNĐ|d)',
-      caseSensitive: false,
-    );
-    final balanceMatch = balanceRegex.firstMatch(content);
-    if (balanceMatch != null) {
-      String rawBalance = balanceMatch.group(1) ?? '0';
-      parsedAccountBalance = int.tryParse(rawBalance.replaceAll(RegExp(r'[^\d]'), '')) ?? 0;
+    final parsed = BankMessageParser.parse(content, packageName: packageName);
+    if (parsed == null) {
+      debugPrint("[AutoTransactionService] Bỏ qua SMS/thông báo không khớp cấu trúc ngân hàng: $content");
+      return false;
     }
 
-    final mentionsBalance = lowerContent.contains('so du') || lowerContent.contains('số dư');
-    final hasSignedAmount = RegExp(r'[+-]\s*\d').hasMatch(content);
-    final hasTxKeyword = RegExp(r'\b(gd|ps)\b|giao dịch|giao dich|biến động|bien dong|chuyển khoản|chuyen khoan|thanh toán|thanh toan|rút tiền|rut tien', caseSensitive: false).hasMatch(content);
-    if (mentionsBalance && !hasSignedAmount && !hasTxKeyword) return false;
-
-    final regex = RegExp(
-      r'(?:GD|PS|So tien|chuyen|tru|cong|thanh toan)?\s*([+-]?\d{1,3}(?:[.,]\d{3})+|[+-]?\d+)\s*(?:VND|đ|VNĐ|d|k\b)',
-      caseSensitive: false,
-    );
-    final match = regex.firstMatch(content);
-
-    if (match != null) {
-      String rawMatch = match.group(1) ?? '0';
-      bool isExpenseFromSign = rawMatch.contains('-');
-      String cleaned = rawMatch.replaceAll(RegExp(r'[^\d]'), '');
-      int amount = int.tryParse(cleaned) ?? 0;
-
-      if (amount >= 1000) {
-        bool isIncome = rawMatch.contains('+') ||
-            lowerContent.contains('giao dịch +') ||
-            lowerContent.contains('gd: +') ||
-            lowerContent.contains('gd:+') ||
-            lowerContent.contains('ps:+') ||
-            lowerContent.contains('ps: +') ||
-            lowerContent.contains('ck:+') ||
-            lowerContent.contains('cộng') ||
-            lowerContent.contains('nhận');
-
-    bool isExpense = !isIncome && (
-            isExpenseFromSign ||
-                lowerContent.contains('trừ') ||
-                lowerContent.contains('thanh toan') ||
-                lowerContent.contains('chi') ||
-                lowerContent.contains('rut tien')
-        );
-
-        if (!isIncome && !isExpense) return false;
-
-        await _saveAutoTransaction(amount, isExpense, content, parsedAccountBalance, extractedStk, packageName: packageName);
-        return true;
-      }
-    }
-
-    return false;
+    await _saveParsedTransaction(parsed, rawContent: content, packageName: packageName);
+    return true;
   }
 
-  Future<void> _saveAutoTransaction(
-      int amount,
-      bool isExpense,
-      String rawContent,
-      int? parsedAccountBalance,
-      String? extractedStk, {
+  Future<void> _saveParsedTransaction(
+      ParsedBankMessage parsed, {
+        required String rawContent,
         String packageName = '',
       }) async {
     final prefs = await SharedPreferences.getInstance();
@@ -341,53 +288,64 @@ class AutoTransactionService {
     }
 
     final activeUserId = userId;
-    List<Map<String, dynamic>> wallets = await DatabaseHelper.instance.getWallets(activeUserId);
+    final detectedBankName = parsed.bankName;
+    final amount = parsed.amount;
+    final isExpense = parsed.isExpense;
+    final parsedAccountBalance = parsed.endingBalance;
+    final extractedStk = parsed.accountNumber;
+    final refId = parsed.refId;
 
-    String detectedBankName = 'VietinBank';
-    final lowerContent = rawContent.toLowerCase();
-    if (lowerContent.contains('vietin') || lowerContent.contains('ctg')) {
-      detectedBankName = 'VietinBank';
-    } else if (lowerContent.contains('mbbank') || lowerContent.contains('mb bank') || lowerContent.contains('mcbank')) {
-      detectedBankName = 'MBBank';
-    } else if (lowerContent.contains('vcb') || lowerContent.contains('vietcombank')) {
-      detectedBankName = 'Vietcombank';
-    } else if (lowerContent.contains('tcb') || lowerContent.contains('techcombank')) {
-      detectedBankName = 'Techcombank';
-    } else if (lowerContent.contains('bidv')) {
-      detectedBankName = 'BIDV';
-    } else if (lowerContent.contains('vpbank') || lowerContent.contains('vpb')) {
-      detectedBankName = 'VPBank';
-    } else if (lowerContent.contains('acb')) {
-      detectedBankName = 'ACB';
-    } else if (lowerContent.contains('momo')) {
-      detectedBankName = 'MoMo';
-    } else if (lowerContent.contains('zalopay')) {
-      detectedBankName = 'ZaloPay';
+    // Stable Dedup Key Check in SQLite before transaction creation
+    final now = DateTime.now();
+    final minuteStr = "${now.year}${now.month}${now.day}${now.hour}${now.minute}";
+    final dedupKey = (refId != null && refId.isNotEmpty)
+        ? "REF_$refId"
+        : "HASH_${detectedBankName}_${extractedStk ?? ''}_${amount}_${isExpense}_$minuteStr";
+
+    final existingDedupTx = await db.query(
+      'transactions',
+      where: 'userId = ? AND note LIKE ?',
+      whereArgs: [activeUserId, '%$dedupKey%'],
+      limit: 1,
+    );
+
+    if (existingDedupTx.isNotEmpty) {
+      debugPrint("[AutoTransactionService] Bỏ qua vì phát hiện giao dịch trùng lặp trong SQLite: $dedupKey");
+      return;
     }
 
+    List<Map<String, dynamic>> wallets = await DatabaseHelper.instance.getWallets(activeUserId);
     Map<String, dynamic>? matchedWallet = findMatchingWallet(wallets, rawContent, extractedStk);
 
     if (matchedWallet == null) {
       final newClientId = DatabaseHelper.instance.generateUuid();
-      final initBal = parsedAccountBalance ?? (isExpense ? 0 : amount);
+      final initBal = parsedAccountBalance != null
+          ? (isExpense ? parsedAccountBalance + amount : parsedAccountBalance - amount)
+          : (isExpense ? 0 : amount);
+      final finalBal = parsedAccountBalance ?? (isExpense ? 0 : amount);
       final walletTitle = 'Ví $detectedBankName';
 
       int newWalletId = await db.insert('wallets', {
         'userId': activeUserId,
         'name': walletTitle,
         'type': 'bank',
-        'balance': initBal,
+        'balance': finalBal,
         'initialBalance': initBal,
         'accountNumber': extractedStk ?? '',
         'clientId': newClientId,
       });
 
-      matchedWallet = {
+      try {
+        await SyncService.instance.syncUnsyncedWallets(activeUserId);
+      } catch (_) {}
+
+      final createdWallet = await DatabaseHelper.instance.getWalletById(newWalletId);
+      matchedWallet = createdWallet ?? {
         'id': newWalletId,
         'userId': activeUserId,
         'name': walletTitle,
         'type': 'bank',
-        'balance': initBal,
+        'balance': finalBal,
         'initialBalance': initBal,
         'accountNumber': extractedStk ?? '',
         'clientId': newClientId,
@@ -399,20 +357,47 @@ class AutoTransactionService {
     final walletName = matchedWallet['name'] as String;
     final currentBalance = matchedWallet['balance'] as int;
 
-    String displayNote = rawContent;
-    final ndMatch = RegExp(r'ND:\s*(.*)', caseSensitive: false).firstMatch(rawContent);
-    if (ndMatch != null) {
-      displayNote = ndMatch.group(1)?.trim() ?? rawContent;
-    }
+    String displayNote = parsed.displayNote ?? rawContent;
 
     final generatedEventId = DatabaseHelper.instance.generateUuid();
 
+    final expectedBalanceAfterTx = isExpense ? (currentBalance - amount) : (currentBalance + amount);
+    int? adjustmentDelta;
+    if (parsedAccountBalance != null && currentBalance > 0 && parsedAccountBalance != expectedBalanceAfterTx) {
+      adjustmentDelta = parsedAccountBalance - expectedBalanceAfterTx;
+    }
+
     int insertedTxId = 0;
-    int newBalance = parsedAccountBalance ?? (isExpense ? currentBalance - amount : currentBalance + amount);
+    int finalWalletBalance = parsedAccountBalance ?? expectedBalanceAfterTx;
+
     await db.transaction((txn) async {
+      if (adjustmentDelta != null && adjustmentDelta != 0) {
+        final adjEventId = DatabaseHelper.instance.generateUuid();
+        final isAdjDecrease = adjustmentDelta < 0;
+        final adjAmount = adjustmentDelta.abs();
+
+        await txn.insert(
+          'transactions',
+          {
+            'userId': walletUserId,
+            'walletId': walletId,
+            'toWalletId': null,
+            'amount': adjAmount,
+            'type': 'adjustment',
+            'adjustmentDirection': isAdjDecrease ? 'decrease' : 'increase',
+            'isExpense': isAdjDecrease ? 1 : 0,
+            'categoryName': 'Sửa số dư',
+            'date': DateTime.now().toIso8601String(),
+            'note': 'Auto Audit: Điều chỉnh cân bằng số dư với ngân hàng ($dedupKey)',
+            'isSynced': 0,
+            'eventId': adjEventId,
+          },
+        );
+      }
+
       await txn.update(
         'wallets',
-        {'balance': newBalance},
+        {'balance': finalWalletBalance},
         where: 'id = ?',
         whereArgs: [walletId],
       );
@@ -428,7 +413,7 @@ class AutoTransactionService {
           'isExpense': isExpense ? 1 : 0,
           'categoryName': isExpense ? 'Hóa đơn' : 'Tiền lương',
           'date': DateTime.now().toIso8601String(),
-          'note': 'Auto: $displayNote',
+          'note': 'Auto [$dedupKey]: $displayNote',
           'isSynced': 0,
           'eventId': generatedEventId,
         },
@@ -442,25 +427,29 @@ class AutoTransactionService {
       String formattedAmount = _formatMoney(amount);
       await NotificationService.instance.showNotification(
         'SmartMoney - $typeText tự động',
-        '$typeText +$formattedAmount đ tại ví "$walletName".',
+        'Đã ghi nhận $typeText ${isExpense ? "-" : "+"}$formattedAmount đ tại ví "$walletName".',
       );
     } catch (e) {
       debugPrint("Notification error in background: $e");
     }
 
     try {
+      await SyncService.instance.syncUnsyncedWallets(walletUserId);
+      final freshWallet = await DatabaseHelper.instance.getWalletById(walletId);
+      final serverWalletId = (freshWallet != null ? freshWallet['serverId'] : null) as int?;
+
       final txData = {
         'id': insertedTxId,
         'eventId': generatedEventId,
         'amount': amount,
         'type': isExpense ? 'expense' : 'income',
-        'walletId': walletId,
+        'walletId': serverWalletId ?? walletId,
         'walletName': walletName,
         'bankName': walletName,
         'packageName': packageName,
         'categoryName': isExpense ? 'Hóa đơn' : 'Tiền lương',
         'date': DateTime.now().toIso8601String(),
-        'note': 'Auto: $displayNote',
+        'note': 'Auto [$dedupKey]: $displayNote',
       };
       await SyncService.instance.syncTransaction(txData);
     } catch (e) {
