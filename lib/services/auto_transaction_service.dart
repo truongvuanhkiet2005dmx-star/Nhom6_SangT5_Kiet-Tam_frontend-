@@ -48,7 +48,9 @@ class AutoTransactionService {
         debugPrint("[AutoTransactionService] Notification Listener Permission not granted.");
       }
 
-      await NotificationsListener.initialize(callbackHandle: notificationCallbackHandle);
+      await NotificationsListener.initialize(
+        callbackHandle: notificationCallbackHandle,
+      );
 
       NotificationsListener.receivePort?.listen((evt) {
         handleNotificationEvent(evt);
