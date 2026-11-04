@@ -58,7 +58,7 @@ class _CalendarTabState extends State<CalendarTab> {
         DateTime? date = DateTime.tryParse(rawDate);
         if (date == null) continue;
 
-        if (rawDate.endsWith('Z')) {
+        if (date.isUtc) {
           date = date.toLocal();
         }
 

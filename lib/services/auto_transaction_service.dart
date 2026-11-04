@@ -264,6 +264,11 @@ class AutoTransactionService {
       parsedAccountBalance = int.tryParse(rawBalance.replaceAll(RegExp(r'[^\d]'), '')) ?? 0;
     }
 
+    final mentionsBalance = lowerContent.contains('so du') || lowerContent.contains('số dư');
+    final hasSignedAmount = RegExp(r'[+-]\s*\d').hasMatch(content);
+    final hasTxKeyword = RegExp(r'\b(gd|ps)\b|giao dịch|giao dich|biến động|bien dong|chuyển khoản|chuyen khoan|thanh toán|thanh toan|rút tiền|rut tien', caseSensitive: false).hasMatch(content);
+    if (mentionsBalance && !hasSignedAmount && !hasTxKeyword) return false;
+
     final regex = RegExp(
       r'(?:GD|PS|So tien|chuyen|tru|cong|thanh toan)?\s*([+-]?\d{1,3}(?:[.,]\d{3})+|[+-]?\d+)\s*(?:VND|đ|VNĐ|d|k\b)',
       caseSensitive: false,
@@ -287,14 +292,15 @@ class AutoTransactionService {
             lowerContent.contains('cộng') ||
             lowerContent.contains('nhận');
 
-        bool isExpense = !isIncome && (
+    bool isExpense = !isIncome && (
             isExpenseFromSign ||
-                lowerContent.contains('-') ||
                 lowerContent.contains('trừ') ||
                 lowerContent.contains('thanh toan') ||
                 lowerContent.contains('chi') ||
                 lowerContent.contains('rut tien')
         );
+
+        if (!isIncome && !isExpense) return false;
 
         await _saveAutoTransaction(amount, isExpense, content, parsedAccountBalance, extractedStk, packageName: packageName);
         return true;
