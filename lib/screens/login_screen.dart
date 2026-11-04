@@ -90,8 +90,13 @@ class _LoginScreenState extends State<LoginScreen> {
       if (!mounted) return;
 
       setState(() => _isLoading = false);
-      final errorMsg = e is ApiException ? e.message : 'Không thể gửi mã OTP: $e';
-      _showSnackBar(errorMsg, Colors.red);
+      final currentServerUrl = await ApiService.instance.baseUrl;
+      final errorStr = e.toString();
+      String userFriendlyMessage = e is ApiException ? e.message : 'Không thể gửi mã OTP: $e';
+      if (errorStr.contains('Timeout') || errorStr.contains('SocketException') || errorStr.contains('refused')) {
+        userFriendlyMessage = 'Không thể kết nối Server ($currentServerUrl). Hãy chạm nút 🌐 ở góc trên để chỉnh IP máy tính hoặc ngrok URL!';
+      }
+      _showSnackBar(userFriendlyMessage, Colors.red);
     }
   }
 
@@ -154,6 +159,76 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
+  Future<void> _showServerConfigDialog() async {
+    final prefs = await SharedPreferences.getInstance();
+    final currentBase = await ApiService.instance.baseUrl;
+    final controller = TextEditingController(text: currentBase);
+
+    if (!mounted) return;
+
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          backgroundColor: AppColors.card,
+          title: const Row(
+            children: [
+              Icon(Icons.dns_outlined, color: AppColors.primary),
+              SizedBox(width: 8),
+              Text('Cấu hình Server Backend', style: TextStyle(color: AppColors.textDark, fontSize: 16, fontWeight: FontWeight.bold)),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Nhập địa chỉ Backend API (kết thúc bằng /api).\n\n• Điện thoại thật Wi-Fi: http://192.168.x.x:5087/api\n• Android Emulator: http://10.0.2.2:5087/api\n• Ngrok Public URL: https://...ngrok-free.dev/api',
+                style: TextStyle(color: AppColors.textSub, fontSize: 12),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: controller,
+                style: const TextStyle(color: AppColors.textDark, fontSize: 13),
+                decoration: const InputDecoration(
+                  labelText: 'Địa chỉ Backend URL',
+                  labelStyle: TextStyle(color: AppColors.textSub),
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () async {
+                await prefs.remove('custom_backend_url');
+                if (!ctx.mounted) return;
+                Navigator.pop(ctx);
+                _showSnackBar('Đã khôi phục địa chỉ Server mặc định!', Colors.green);
+              },
+              child: const Text('Mặc định', style: TextStyle(color: AppColors.textSub)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
+              onPressed: () async {
+                final url = controller.text.trim();
+                if (url.isNotEmpty) {
+                  await prefs.setString('custom_backend_url', url);
+                } else {
+                  await prefs.remove('custom_backend_url');
+                }
+                if (!ctx.mounted) return;
+                Navigator.pop(ctx);
+                _showSnackBar('Đã lưu địa chỉ Server mới!', Colors.green);
+              },
+              child: const Text('Lưu', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   void _showSnackBar(String message, Color color) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -186,6 +261,13 @@ class _LoginScreenState extends State<LoginScreen> {
             }
           },
         ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.dns_outlined, color: AppColors.primary),
+            tooltip: 'Đổi địa chỉ Server Backend',
+            onPressed: _showServerConfigDialog,
+          ),
+        ],
       ),
       body: SafeArea(
         child: SingleChildScrollView(

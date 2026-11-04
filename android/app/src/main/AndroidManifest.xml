@@ -8,7 +8,8 @@
     <application
         android:label="frontend_nhom6_kiet_tam_app_quanlychitieu"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:usesCleartextTraffic="true">
         <activity
             android:name=".MainActivity"
             android:exported="true"

@@ -343,35 +343,56 @@ class AutoTransactionService {
     final activeUserId = userId;
     List<Map<String, dynamic>> wallets = await DatabaseHelper.instance.getWallets(activeUserId);
 
-    if (wallets.isEmpty) {
+    String detectedBankName = 'VietinBank';
+    final lowerContent = rawContent.toLowerCase();
+    if (lowerContent.contains('vietin') || lowerContent.contains('ctg')) {
+      detectedBankName = 'VietinBank';
+    } else if (lowerContent.contains('mbbank') || lowerContent.contains('mb bank') || lowerContent.contains('mcbank')) {
+      detectedBankName = 'MBBank';
+    } else if (lowerContent.contains('vcb') || lowerContent.contains('vietcombank')) {
+      detectedBankName = 'Vietcombank';
+    } else if (lowerContent.contains('tcb') || lowerContent.contains('techcombank')) {
+      detectedBankName = 'Techcombank';
+    } else if (lowerContent.contains('bidv')) {
+      detectedBankName = 'BIDV';
+    } else if (lowerContent.contains('vpbank') || lowerContent.contains('vpb')) {
+      detectedBankName = 'VPBank';
+    } else if (lowerContent.contains('acb')) {
+      detectedBankName = 'ACB';
+    } else if (lowerContent.contains('momo')) {
+      detectedBankName = 'MoMo';
+    } else if (lowerContent.contains('zalopay')) {
+      detectedBankName = 'ZaloPay';
+    }
+
+    Map<String, dynamic>? matchedWallet = findMatchingWallet(wallets, rawContent, extractedStk);
+
+    if (matchedWallet == null) {
       final newClientId = DatabaseHelper.instance.generateUuid();
+      final initBal = parsedAccountBalance ?? (isExpense ? 0 : amount);
+      final walletTitle = 'Ví $detectedBankName';
+
       int newWalletId = await db.insert('wallets', {
         'userId': activeUserId,
-        'name': 'Ví VietinBank',
+        'name': walletTitle,
         'type': 'bank',
-        'balance': 0,
+        'balance': initBal,
+        'initialBalance': initBal,
         'accountNumber': extractedStk ?? '',
         'clientId': newClientId,
       });
-      wallets = [
-        {
-          'id': newWalletId,
-          'userId': activeUserId,
-          'name': 'Ví VietinBank',
-          'type': 'bank',
-          'balance': 0,
-          'accountNumber': extractedStk ?? '',
-          'clientId': newClientId,
-        }
-      ];
-    }
 
-    final matchedWalletCandidate = findMatchingWallet(wallets, rawContent, extractedStk);
-    if (matchedWalletCandidate == null) {
-      debugPrint("[AutoTransactionService] Bỏ qua SMS/thông báo vì không tìm thấy ví ngân hàng phù hợp.");
-      return;
+      matchedWallet = {
+        'id': newWalletId,
+        'userId': activeUserId,
+        'name': walletTitle,
+        'type': 'bank',
+        'balance': initBal,
+        'initialBalance': initBal,
+        'accountNumber': extractedStk ?? '',
+        'clientId': newClientId,
+      };
     }
-    final matchedWallet = matchedWalletCandidate;
 
     final walletId = matchedWallet['id'] as int;
     final walletUserId = matchedWallet['userId'] as int? ?? activeUserId;
@@ -387,7 +408,7 @@ class AutoTransactionService {
     final generatedEventId = DatabaseHelper.instance.generateUuid();
 
     int insertedTxId = 0;
-    int newBalance = isExpense ? currentBalance - amount : currentBalance + amount;
+    int newBalance = parsedAccountBalance ?? (isExpense ? currentBalance - amount : currentBalance + amount);
     await db.transaction((txn) async {
       await txn.update(
         'wallets',

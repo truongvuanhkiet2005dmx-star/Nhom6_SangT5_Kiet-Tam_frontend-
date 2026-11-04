@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../core/app_colors.dart';
+import '../services/api_service.dart';
 import 'login_screen.dart';
 
 class WelcomeSetupScreen extends StatefulWidget {
@@ -54,10 +55,89 @@ class _WelcomeSetupScreenState
     );
   }
 
+  Future<void> _showServerConfigDialog() async {
+    final prefs = await SharedPreferences.getInstance();
+    final currentBase = await ApiService.instance.baseUrl;
+    final controller = TextEditingController(text: currentBase);
+
+    if (!mounted) return;
+
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          backgroundColor: AppColors.card,
+          title: const Row(
+            children: [
+              Icon(Icons.dns_outlined, color: AppColors.primary),
+              SizedBox(width: 8),
+              Text('Cấu hình Server Backend', style: TextStyle(color: AppColors.textDark, fontSize: 16, fontWeight: FontWeight.bold)),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Nhập địa chỉ Backend API (kết thúc bằng /api).\n\n• Điện thoại thật Wi-Fi: http://192.168.x.x:5087/api\n• Android Emulator: http://10.0.2.2:5087/api\n• Ngrok Public URL: https://...ngrok-free.dev/api',
+                style: TextStyle(color: AppColors.textSub, fontSize: 12),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: controller,
+                style: const TextStyle(color: AppColors.textDark, fontSize: 13),
+                decoration: const InputDecoration(
+                  labelText: 'Địa chỉ Backend URL',
+                  labelStyle: TextStyle(color: AppColors.textSub),
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () async {
+                await prefs.remove('custom_backend_url');
+                if (!ctx.mounted) return;
+                Navigator.pop(ctx);
+              },
+              child: const Text('Mặc định', style: TextStyle(color: AppColors.textSub)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
+              onPressed: () async {
+                final url = controller.text.trim();
+                if (url.isNotEmpty) {
+                  await prefs.setString('custom_backend_url', url);
+                } else {
+                  await prefs.remove('custom_backend_url');
+                }
+                if (!ctx.mounted) return;
+                Navigator.pop(ctx);
+              },
+              child: const Text('Lưu', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.background,
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.dns_outlined, color: AppColors.primary),
+            tooltip: 'Cấu hình Server Backend',
+            onPressed: _showServerConfigDialog,
+          ),
+        ],
+      ),
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.symmetric(
