@@ -32,7 +32,7 @@ class DatabaseHelper {
 
     final db = await openDatabase(
       path,
-      version: 13,
+      version: 14,
       onCreate: _createDB,
       onUpgrade: _onUpgrade,
     );
@@ -137,6 +137,8 @@ class DatabaseHelper {
         note TEXT,
         isSynced INTEGER NOT NULL DEFAULT 0,
         eventId TEXT,
+        creatorUserId TEXT,
+        creatorDisplayName TEXT,
         FOREIGN KEY (userId) REFERENCES users(id),
         FOREIGN KEY (walletId) REFERENCES wallets(id),
         FOREIGN KEY (toWalletId) REFERENCES wallets(id)
@@ -449,6 +451,25 @@ class DatabaseHelper {
         ''');
       } catch (e) {
         debugPrint("[DatabaseHelper] Migration v13 warning: $e");
+      }
+    }
+
+    if (oldVersion < 14) {
+      try {
+        await db.execute('''
+          ALTER TABLE transactions
+          ADD COLUMN creatorUserId TEXT
+        ''');
+      } catch (e) {
+        debugPrint("[DatabaseHelper] Migration v14 creatorUserId warning: $e");
+      }
+      try {
+        await db.execute('''
+          ALTER TABLE transactions
+          ADD COLUMN creatorDisplayName TEXT
+        ''');
+      } catch (e) {
+        debugPrint("[DatabaseHelper] Migration v14 creatorDisplayName warning: $e");
       }
     }
   }
@@ -1121,6 +1142,8 @@ class DatabaseHelper {
     final categoryName = remoteTx['categoryName']?.toString() ?? 'Khác';
     final date = remoteTx['occurredAtUtc']?.toString() ?? remoteTx['occurredAt']?.toString() ?? DateTime.now().toUtc().toIso8601String();
     final note = remoteTx['note']?.toString() ?? '';
+    final creatorUserId = remoteTx['creatorUserId']?.toString() ?? remoteTx['userId']?.toString();
+    final creatorDisplayName = remoteTx['creatorDisplayName']?.toString() ?? remoteTx['userDisplayName']?.toString() ?? remoteTx['displayName']?.toString();
 
     int? localWalletId;
     final remoteWalletId = (remoteTx['walletId'] as num?)?.toInt();
@@ -1157,6 +1180,8 @@ class DatabaseHelper {
             'date': date,
             'note': note,
             'isSynced': 1,
+            if (creatorUserId != null) 'creatorUserId': creatorUserId,
+            if (creatorDisplayName != null) 'creatorDisplayName': creatorDisplayName,
             if (localWalletId != null) 'walletId': localWalletId,
             if (localToWalletId != null) 'toWalletId': localToWalletId,
           },
@@ -1189,6 +1214,8 @@ class DatabaseHelper {
             'date': date,
             'note': note,
             'isSynced': 1,
+            if (creatorUserId != null) 'creatorUserId': creatorUserId,
+            if (creatorDisplayName != null) 'creatorDisplayName': creatorDisplayName,
             if (eventId != null) 'eventId': eventId,
             if (localWalletId != null) 'walletId': localWalletId,
             if (localToWalletId != null) 'toWalletId': localToWalletId,
@@ -1215,6 +1242,8 @@ class DatabaseHelper {
       'note': note,
       'isSynced': 1,
       'eventId': eventId ?? generateUuid(),
+      if (creatorUserId != null) 'creatorUserId': creatorUserId,
+      if (creatorDisplayName != null) 'creatorDisplayName': creatorDisplayName,
     });
   }
 }

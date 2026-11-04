@@ -7,25 +7,45 @@ class VoiceParserUtil {
     String lower = text.toLowerCase();
     int amount = 0;
 
-    // 1. Shorthand "50k", "100k", "20k", "50 nghìn", "100 ngàn"
-    final kRegex = RegExp(r'(\d+(?:[.,]\d+)?)\s*(k|nghìn|ngàn)(?!\p{L})', caseSensitive: false, unicode: true);
-    final kMatch = kRegex.firstMatch(lower);
-    if (kMatch != null) {
-      double numVal = double.tryParse(kMatch.group(1)!.replaceAll(',', '.')) ?? 0;
-      amount = (numVal * 1000).round();
+    // 1. Combined Millions + Thousands with digits (e.g. "2 triệu 500 nghìn", "1 triệu 200k", "2 triệu 500")
+    final combinedTrieuRegex = RegExp(
+      r'(\d+(?:[.,]\d+)?)\s*(?:triệu|tr(?!\p{L}))\s*(\d+(?:[.,]\d+)?)\s*(k|nghìn|ngàn|trăm)?(?!\p{L})',
+      caseSensitive: false,
+      unicode: true,
+    );
+    final combinedTrieuMatch = combinedTrieuRegex.firstMatch(lower);
+    if (combinedTrieuMatch != null) {
+      double millions = double.tryParse(combinedTrieuMatch.group(1)!.replaceAll(',', '.')) ?? 0;
+      double remainder = double.tryParse(combinedTrieuMatch.group(2)!.replaceAll(',', '.')) ?? 0;
+      String? unit = combinedTrieuMatch.group(3)?.toLowerCase();
+
+      int subAmount = 0;
+      if (unit == 'trăm') {
+        subAmount = (remainder * 100000).round();
+      } else if (unit == 'k' || unit == 'nghìn' || unit == 'ngàn' || unit == null) {
+        subAmount = remainder < 10 ? (remainder * 100000).round() : (remainder * 1000).round();
+      }
+
+      amount = (millions * 1000000).round() + subAmount;
     }
 
-    // 2. Shorthand "củ" (Ví dụ: "5 củ" = 5.000.000đ, "1.5 củ" = 1.500.000đ)
+    // 2. Combined Hundreds + Thousands with digits (e.g. "5 trăm 50 nghìn")
     if (amount == 0) {
-      final cuRegex = RegExp(r'(\d+(?:[.,]\d+)?)\s*(củ)(?!\p{L})', caseSensitive: false, unicode: true);
-      final cuMatch = cuRegex.firstMatch(lower);
-      if (cuMatch != null) {
-        double numVal = double.tryParse(cuMatch.group(1)!.replaceAll(',', '.')) ?? 0;
-        amount = (numVal * 1000000).round();
+      final combinedTramRegex = RegExp(
+        r'(\d+(?:[.,]\d+)?)\s*trăm\s*(\d+(?:[.,]\d+)?)\s*(k|nghìn|ngàn)?(?!\p{L})',
+        caseSensitive: false,
+        unicode: true,
+      );
+      final combinedTramMatch = combinedTramRegex.firstMatch(lower);
+      if (combinedTramMatch != null) {
+        double hundreds = double.tryParse(combinedTramMatch.group(1)!.replaceAll(',', '.')) ?? 0;
+        double remainder = double.tryParse(combinedTramMatch.group(2)!.replaceAll(',', '.')) ?? 0;
+
+        amount = (hundreds * 100000).round() + (remainder * 1000).round();
       }
     }
 
-    // 3. Shorthand "triệu rưỡi", "1 triệu rưỡi", "2 triệu", "1.5 tr"
+    // 3. Shorthand "triệu rưỡi", "1 triệu rưỡi", "1.5 triệu", "1.5 tr"
     if (amount == 0) {
       final trieuRuoiRegex = RegExp(r'(\d+(?:[.,]\d+)?)\s*(?:triệu|tr(?!\p{L}))\s*rưỡi', caseSensitive: false, unicode: true);
       final trieuRuoiMatch = trieuRuoiRegex.firstMatch(lower);
@@ -37,6 +57,22 @@ class VoiceParserUtil {
       }
     }
 
+    // 4. Shorthand "củ" (e.g. "5 củ", "1.5 củ")
+    if (amount == 0) {
+      final cuRegex = RegExp(r'(\d+(?:[.,]\d+)?)\s*(củ)(?!\p{L})', caseSensitive: false, unicode: true);
+      final cuMatch = cuRegex.firstMatch(lower);
+      if (cuMatch != null) {
+        double numVal = double.tryParse(cuMatch.group(1)!.replaceAll(',', '.')) ?? 0;
+        amount = (numVal * 1000000).round();
+      }
+    }
+
+    // 5. Full Vietnamese word-number parser (e.g. "hai triệu năm trăm nghìn", "hai mươi nghìn")
+    if (amount == 0 && (lower.contains('ngàn') || lower.contains('nghìn') || lower.contains('trăm') || lower.contains('triệu') || lower.contains('mươi') || lower.contains('mười'))) {
+      amount = _parseVietnameseWordsToNumber(lower);
+    }
+
+    // 6. Single unit "triệu"
     if (amount == 0) {
       final trieuRegex = RegExp(r'(\d+(?:[.,]\d+)?)\s*(triệu|tr(?!\p{L}))', caseSensitive: false, unicode: true);
       final trieuMatch = trieuRegex.firstMatch(lower);
@@ -46,7 +82,17 @@ class VoiceParserUtil {
       }
     }
 
-    // 4. Shorthand "trăm rưỡi", "1 trăm rưỡi"
+    // 7. Single unit "k", "nghìn", "ngàn"
+    if (amount == 0) {
+      final kRegex = RegExp(r'(\d+(?:[.,]\d+)?)\s*(k|nghìn|ngàn)(?!\p{L})', caseSensitive: false, unicode: true);
+      final kMatch = kRegex.firstMatch(lower);
+      if (kMatch != null) {
+        double numVal = double.tryParse(kMatch.group(1)!.replaceAll(',', '.')) ?? 0;
+        amount = (numVal * 1000).round();
+      }
+    }
+
+    // 8. Shorthand "trăm rưỡi", "1 trăm rưỡi"
     if (amount == 0 && (lower.contains('trăm rưỡi') || lower.contains('trăm rưỡ'))) {
       final tramRuoiRegex = RegExp(r'(\d+)\s*trăm\s*rưỡi', caseSensitive: false, unicode: true);
       final tramRuoiMatch = tramRuoiRegex.firstMatch(lower);
@@ -58,7 +104,7 @@ class VoiceParserUtil {
       }
     }
 
-    // 5. Shorthand "lít", "xị", "sị" (Ví dụ: "2 lít" = 200.000đ)
+    // 9. Shorthand "lít", "xị", "sị" (Ví dụ: "2 lít" = 200.000đ)
     if (amount == 0) {
       final litRegex = RegExp(r'(\d+(?:[.,]\d+)?)\s*(lít|xị|sị)(?!\p{L})', caseSensitive: false, unicode: true);
       final litMatch = litRegex.firstMatch(lower);
@@ -68,17 +114,7 @@ class VoiceParserUtil {
       }
     }
 
-    // 6. Shorthand "200 trăm nghìn"
-    if (amount == 0) {
-      final tramNghinRegex = RegExp(r'(\d+(?:[.,]\d+)?)\s*(trăm nghìn|trăm ngàn)', caseSensitive: false, unicode: true);
-      final tramNghinMatch = tramNghinRegex.firstMatch(lower);
-      if (tramNghinMatch != null) {
-        double numVal = double.tryParse(tramNghinMatch.group(1)!.replaceAll(',', '.')) ?? 0;
-        amount = (numVal * 100000).round();
-      }
-    }
-
-    // 7. Formatted digits or raw digits e.g. "20.000" or "1,500,000" or "50000"
+    // 10. Formatted digits or raw digits e.g. "20.000" or "1,500,000" or "50000"
     if (amount == 0) {
       final formattedDigitRegex = RegExp(r'\b(\d{1,3}(?:[.,]\d{3})+|\d{4,12})\b');
       final formattedDigitMatch = formattedDigitRegex.firstMatch(text);
@@ -89,11 +125,6 @@ class VoiceParserUtil {
           amount = parsedNum;
         }
       }
-    }
-
-    // 8. Full Vietnamese word-number parser
-    if (amount == 0 && (lower.contains('ngàn') || lower.contains('nghìn') || lower.contains('trăm') || lower.contains('triệu') || lower.contains('mươi') || lower.contains('mười'))) {
-      amount = _parseVietnameseWordsToNumber(lower);
     }
 
     String category = 'Khác';

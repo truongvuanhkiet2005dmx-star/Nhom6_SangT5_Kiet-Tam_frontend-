@@ -65,5 +65,50 @@ void main() {
       expect(result['category'], equals('Đi lại'));
       expect(result['note'], equals(input));
     });
+
+    test('8. Combined "2 triệu 500 nghìn"', () {
+      const input = 'Mua máy tính 2 triệu 500 nghìn';
+      final result = VoiceParserUtil.parseVoiceInput(input);
+
+      expect(result['amount'], equals(2500000));
+      expect(result['category'], equals('Mua sắm'));
+      expect(result['note'], equals(input));
+    });
+
+    test('9. Combined "1 triệu 200k"', () {
+      const input = 'Tiền nhà 1 triệu 200k';
+      final result = VoiceParserUtil.parseVoiceInput(input);
+
+      expect(result['amount'], equals(1200000));
+      expect(result['category'], equals('Hóa đơn'));
+      expect(result['note'], equals(input));
+    });
+
+    test('10. Combined "5 trăm 50 nghìn"', () {
+      const input = 'Mua quần áo 5 trăm 50 nghìn';
+      final result = VoiceParserUtil.parseVoiceInput(input);
+
+      expect(result['amount'], equals(550000));
+      expect(result['category'], equals('Mua sắm'));
+      expect(result['note'], equals(input));
+    });
+
+    test('11. Combined words "hai triệu năm trăm nghìn"', () {
+      const input = 'Lương hai triệu năm trăm nghìn';
+      final result = VoiceParserUtil.parseVoiceInput(input);
+
+      expect(result['amount'], equals(2500000));
+      expect(result['category'], equals('Lương'));
+      expect(result['note'], equals(input));
+    });
+
+    test('12. Sentence without amount should return 0', () {
+      const input = 'Cà phê chiều';
+      final result = VoiceParserUtil.parseVoiceInput(input);
+
+      expect(result['amount'], equals(0));
+      expect(result['category'], equals('Đồ ăn'));
+      expect(result['note'], equals(input));
+    });
   });
 }
