@@ -7,7 +7,12 @@ import '../services/api_service.dart';
 import '../services/auto_transaction_service.dart';
 
 class ReportsTab extends StatefulWidget {
-  const ReportsTab({super.key});
+  final bool isActive;
+
+  const ReportsTab({
+    super.key,
+    this.isActive = true,
+  });
 
   @override
   State<ReportsTab> createState() => _ReportsTabState();
@@ -32,7 +37,11 @@ class _ReportsTabState extends State<ReportsTab> {
   @override
   void initState() {
     super.initState();
-    _loadReports();
+    if (widget.isActive) {
+      _loadReports();
+    } else {
+      _needsReload = true;
+    }
 
     _autoTxSub = AutoTransactionService.instance.onTransactionAdded.stream.listen((_) {
       if (mounted) {
@@ -41,7 +50,21 @@ class _ReportsTabState extends State<ReportsTab> {
     });
   }
 
+  @override
+  void didUpdateWidget(covariant ReportsTab oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!oldWidget.isActive && widget.isActive) {
+      if (_needsReload || _categoryTotals.isEmpty) {
+        _loadReports();
+      }
+    }
+  }
+
   void _onAutoTxAdded() {
+    if (!widget.isActive) {
+      _needsReload = true;
+      return;
+    }
     if (_isFetchingBackend) {
       _needsReload = true;
       return;
@@ -71,116 +94,114 @@ class _ReportsTabState extends State<ReportsTab> {
       });
     }
 
-    final prefs = await SharedPreferences.getInstance();
-    final userId = prefs.getInt('userId');
-    final activeFamilyGroupId = prefs.getInt('activeFamilyGroupId');
-    _monthlyBudget = prefs.getInt('monthly_budget') ?? 10000000;
-
-    if (userId == null) {
-      if (mounted && currentReqId == _reportRequestId) {
-        setState(() => _isLoading = false);
-      }
-      return;
-    }
-
-    bool fetchedFromBackend = false;
-    int total = 0;
-    Map<String, int> categories = {};
-
-    // Thử lấy báo cáo tháng từ C# Backend API
     try {
-      final token = await ApiService.instance.getToken();
-      if (token != null && token.isNotEmpty) {
-        final reportData = await ApiService.instance.getMonthlyReport(
-          year: _selectedYear,
-          month: _selectedMonth,
-          familyGroupId: activeFamilyGroupId,
-        );
+      final prefs = await SharedPreferences.getInstance();
+      final userId = prefs.getInt('userId');
+      final activeFamilyGroupId = prefs.getInt('activeFamilyGroupId');
+      _monthlyBudget = prefs.getInt('monthly_budget') ?? 10000000;
 
-        if (reportData.isNotEmpty) {
-          if (_modeIndex == 0) {
-            total = (reportData['totalExpense'] as num?)?.toInt() ?? 0;
-          } else {
-            total = (reportData['totalIncome'] as num?)?.toInt() ?? 0;
-          }
+      if (userId == null) {
+        if (mounted && currentReqId == _reportRequestId) {
+          setState(() => _isLoading = false);
+        }
+        return;
+      }
 
-          List<dynamic>? categoryList;
-          final breakdown = reportData['breakdown'];
-          if (breakdown is Map) {
-            final picked = _modeIndex == 0 ? breakdown['expense'] : breakdown['income'];
-            if (picked is List) categoryList = picked;
-          }
+      bool fetchedFromBackend = false;
+      int total = 0;
+      Map<String, int> categories = {};
 
-          if (categoryList != null) {
-            for (var item in categoryList) {
-              if (item is Map) {
-                final itemType = item['type']?.toString().toLowerCase();
-                final catName = item['categoryName']?.toString() ?? item['category']?.toString() ?? 'Khác';
-                if (itemType == 'transfer' || itemType == 'adjustment' || catName.toLowerCase().contains('chuyển khoản') || catName.toLowerCase().contains('điều chỉnh')) {
-                  continue;
+      // Thử lấy báo cáo tháng từ C# Backend API
+      try {
+        final token = await ApiService.instance.getToken();
+        if (token != null && token.isNotEmpty) {
+          final reportData = await ApiService.instance.getMonthlyReport(
+            year: _selectedYear,
+            month: _selectedMonth,
+            familyGroupId: activeFamilyGroupId,
+          );
+
+          if (reportData.isNotEmpty) {
+            if (_modeIndex == 0) {
+              total = (reportData['totalExpense'] as num?)?.toInt() ?? 0;
+            } else {
+              total = (reportData['totalIncome'] as num?)?.toInt() ?? 0;
+            }
+
+            List<dynamic>? categoryList;
+            final breakdown = reportData['breakdown'];
+            if (breakdown is Map) {
+              final picked = _modeIndex == 0 ? breakdown['expense'] : breakdown['income'];
+              if (picked is List) categoryList = picked;
+            }
+
+            if (categoryList != null) {
+              for (var item in categoryList) {
+                if (item is Map) {
+                  final itemType = item['type']?.toString().toLowerCase();
+                  final catName = item['categoryName']?.toString() ?? item['category']?.toString() ?? 'Khác';
+                  if (itemType == 'transfer' || itemType == 'adjustment' || catName.toLowerCase().contains('chuyển khoản') || catName.toLowerCase().contains('điều chỉnh')) {
+                    continue;
+                  }
+                  final catAmt = ((item['amount'] ?? item['total']) as num?)?.toInt() ?? 0;
+                  categories[catName] = (categories[catName] ?? 0) + catAmt;
                 }
-                final catAmt = ((item['amount'] ?? item['total']) as num?)?.toInt() ?? 0;
-                categories[catName] = (categories[catName] ?? 0) + catAmt;
               }
             }
-          }
 
-          fetchedFromBackend = true;
-        }
-      }
-    } catch (e) {
-      debugPrint("[ReportsTab] Backend report error (Fallback sang SQLite): $e");
-    }
-
-    // Fallback tính toán từ CSDL SQLite cục bộ nếu không kết nối được backend
-    if (!fetchedFromBackend) {
-      total = 0;
-      categories = {};
-
-      try {
-        final transactions = await DatabaseHelper.instance.getAllTransactions(userId);
-
-        for (final tx in transactions) {
-          final type = tx['type']?.toString().toLowerCase();
-          final cat = tx['categoryName']?.toString();
-          if (type == 'transfer' || type == 'adjustment' || type == 'adjustment_increase' || type == 'adjustment_decrease' || cat == 'Điều chỉnh số dư') continue;
-
-          final isExpense = tx['isExpense'] == 1;
-          if (_modeIndex == 0 && !isExpense) continue;
-          if (_modeIndex == 1 && isExpense) continue;
-
-          final date = DateTime.tryParse(tx['date'].toString());
-          if (date == null) continue;
-
-          if (date.year == _selectedYear && date.month == _selectedMonth) {
-            final amount = (tx['amount'] as num?)?.toInt() ?? 0;
-            final category = tx['categoryName'].toString();
-
-            total += amount;
-            categories[category] = (categories[category] ?? 0) + amount;
+            fetchedFromBackend = true;
           }
         }
       } catch (e) {
-        debugPrint("Local SQLite report load error: $e");
+        debugPrint("[ReportsTab] Backend report error (Fallback sang SQLite): $e");
       }
-    }
 
-    // Đảm bảo không ghi đè nếu người dùng đã chuyển tab khác trong khi chờ async
-    if (!mounted || currentReqId != _reportRequestId) {
+      // Fallback tính toán từ CSDL SQLite cục bộ nếu không kết nối được backend
+      if (!fetchedFromBackend) {
+        total = 0;
+        categories = {};
+
+        try {
+          final transactions = await DatabaseHelper.instance.getAllTransactions(userId);
+
+          for (final tx in transactions) {
+            final type = tx['type']?.toString().toLowerCase();
+            final cat = tx['categoryName']?.toString();
+            if (type == 'transfer' || type == 'adjustment' || type == 'adjustment_increase' || type == 'adjustment_decrease' || cat == 'Điều chỉnh số dư') continue;
+
+            final isExpense = tx['isExpense'] == 1;
+            if (_modeIndex == 0 && !isExpense) continue;
+            if (_modeIndex == 1 && isExpense) continue;
+
+            final date = DateTime.tryParse(tx['date'].toString());
+            if (date == null) continue;
+
+            if (date.year == _selectedYear && date.month == _selectedMonth) {
+              final amount = (tx['amount'] as num?)?.toInt() ?? 0;
+              final category = tx['categoryName'].toString();
+
+              total += amount;
+              categories[category] = (categories[category] ?? 0) + amount;
+            }
+          }
+        } catch (e) {
+          debugPrint("Local SQLite report load error: $e");
+        }
+      }
+
+      if (!mounted || currentReqId != _reportRequestId) return;
+
+      setState(() {
+        _totalAmount = total;
+        _categoryTotals = categories;
+        _isLoading = false;
+      });
+    } finally {
       _isFetchingBackend = false;
-      return;
-    }
-
-    setState(() {
-      _totalAmount = total;
-      _categoryTotals = categories;
-      _isLoading = false;
-    });
-
-    _isFetchingBackend = false;
-    if (_needsReload && mounted) {
-      _needsReload = false;
-      _loadReports();
+      if (_needsReload && mounted && widget.isActive) {
+        _needsReload = false;
+        _loadReports();
+      }
     }
   }
 

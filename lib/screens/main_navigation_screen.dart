@@ -6,6 +6,7 @@ import 'package:permission_handler/permission_handler.dart';
 import '../core/app_colors.dart';
 import '../core/voice_parser_util.dart';
 import '../services/auto_transaction_service.dart';
+import '../services/sync_service.dart';
 import 'home_tab.dart';
 import 'reports_tab.dart';
 import 'wallets_tab.dart';
@@ -49,15 +50,15 @@ class _MainNavigationScreenState
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // Service already initialized once on app startup; do not re-trigger on resume.
+    if (state == AppLifecycleState.resumed) {
+      SharedPreferences.getInstance().then((prefs) {
+        final userId = prefs.getInt('userId');
+        if (userId != null) {
+          SyncService.instance.retryUnsyncedTransactions(userId);
+        }
+      });
+    }
   }
-
-  late final List<Widget> _screens = const [
-    HomeTab(),
-    ReportsTab(),
-    WalletsTab(),
-    ProfileTab(),
-  ];
 
   Future<void> _openAddTransaction({String? amount, String? note}) async {
     await Navigator.push(
@@ -595,11 +596,18 @@ class _MainNavigationScreenState
 
   @override
   Widget build(BuildContext context) {
+    final screens = [
+      const HomeTab(),
+      ReportsTab(isActive: _currentIndex == 1),
+      const WalletsTab(),
+      const ProfileTab(),
+    ];
+
     return Scaffold(
       backgroundColor: AppColors.background,
       body: IndexedStack(
         index: _currentIndex,
-        children: _screens,
+        children: screens,
       ),
 
       floatingActionButton: SizedBox(

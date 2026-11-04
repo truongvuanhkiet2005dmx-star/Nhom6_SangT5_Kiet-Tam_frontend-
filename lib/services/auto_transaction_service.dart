@@ -18,6 +18,7 @@ class AutoTransactionService {
 
   static bool _initialized = false;
   static bool _isInitializing = false;
+  StreamSubscription<dynamic>? _notificationSub;
   final Telephony telephony = Telephony.instance;
   final StreamController<bool> onTransactionAdded = StreamController<bool>.broadcast();
   static final Set<int> _processedCache = {};
@@ -47,8 +48,9 @@ class AutoTransactionService {
         callbackHandle: notificationCallbackHandle,
       );
 
-      // 2. Register receivePort listener SECOND
-      NotificationsListener.receivePort?.listen((evt) {
+      // 2. Register receivePort listener SECOND (safely cancel old subscription first)
+      await _notificationSub?.cancel();
+      _notificationSub = NotificationsListener.receivePort?.listen((evt) {
         handleNotificationEvent(evt);
       });
 

@@ -284,6 +284,18 @@ class SyncService {
     }
   }
 
+  DateTime? _lastRetryTime;
+
+  Future<void> retryUnsyncedTransactions(int userId) async {
+    final now = DateTime.now();
+    if (_lastRetryTime != null && now.difference(_lastRetryTime!) < const Duration(seconds: 15)) {
+      debugPrint("[SyncService] Retry trong thời gian cooldown (< 15s). Bỏ qua.");
+      return;
+    }
+    _lastRetryTime = now;
+    syncAllPendingTransactions(userId);
+  }
+
   Future<void> syncAllPendingTransactions(int userId) async {
     _debounceSyncTimer?.cancel();
     _debounceSyncTimer = Timer(const Duration(milliseconds: 500), () {
