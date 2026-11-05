@@ -9,6 +9,7 @@ import '../core/app_colors.dart';
 import '../core/constants.dart';
 import '../database/database_helper.dart';
 import '../services/api_service.dart';
+import '../services/auto_transaction_service.dart';
 import '../services/native_listener_bridge.dart';
 import 'welcome_setup_screen.dart';
 import 'savings_screen.dart';
@@ -895,9 +896,14 @@ class _FamilyWalletModalState extends State<_FamilyWalletModal> {
             year: now.year,
             month: now.month,
           );
-          if (budgetData.containsKey('monthlyLimit')) {
-            _budgetController.text = (budgetData['monthlyLimit'] as num?)?.toInt().toString() ?? '';
+          final limit = (budgetData['monthlyLimit'] ?? budgetData['limit'] ?? budgetData['amount'] as num?)?.toInt();
+          if (limit != null && limit > 0) {
+            _budgetController.text = limit.toString();
+          } else {
+            _budgetController.clear();
           }
+        } else {
+          _budgetController.clear();
         }
       }
     } catch (e) {
@@ -1130,6 +1136,8 @@ class _FamilyWalletModalState extends State<_FamilyWalletModal> {
         month: now.month,
         monthlyLimit: budgetVal,
       );
+
+      AutoTransactionService.instance.onTransactionAdded.add(true);
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

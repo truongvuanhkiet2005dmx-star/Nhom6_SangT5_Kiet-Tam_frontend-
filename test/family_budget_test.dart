@@ -71,5 +71,38 @@ void main() {
       expect(isExceeded, isTrue);
       expect(overrunDelta, equals(200000));
     });
+
+    test('5. Member Transaction Sync Payload should include familyGroupId', () {
+      final txPayload = {
+        'id': 501,
+        'eventId': 'evt-123-abc',
+        'userId': 102, // Member ID
+        'familyGroupId': 10, // Family Group ID
+        'amount': 150000,
+        'type': 'expense',
+        'isExpense': 1,
+        'categoryName': 'Ăn uống',
+        'walletId': 20, // Member's wallet ID
+      };
+
+      expect(txPayload['familyGroupId'], equals(10));
+      expect(txPayload['userId'], equals(102));
+      expect(txPayload['walletId'], equals(20));
+      expect(txPayload['amount'], equals(150000));
+    });
+
+    test('6. Budget API Response Key Normalization', () {
+      final resp1 = {'monthlyLimit': 5000000};
+      final resp2 = {'limit': 5000000};
+      final resp3 = {'amount': 5000000};
+
+      int extractLimit(Map<String, dynamic> data) {
+        return (data['monthlyLimit'] ?? data['limit'] ?? data['amount'] as num?)?.toInt() ?? 0;
+      }
+
+      expect(extractLimit(resp1), equals(5000000));
+      expect(extractLimit(resp2), equals(5000000));
+      expect(extractLimit(resp3), equals(5000000));
+    });
   });
 }

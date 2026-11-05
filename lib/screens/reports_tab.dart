@@ -31,6 +31,8 @@ class _ReportsTabState extends State<ReportsTab> {
   int _monthlyBudget = 10000000;
   Map<String, int> _categoryTotals = {};
   int _reportRequestId = 0;
+  int? _activeFamilyGroupId;
+  bool _hasGroupReportError = false;
 
   StreamSubscription<bool>? _autoTxSub;
 
@@ -98,8 +100,12 @@ class _ReportsTabState extends State<ReportsTab> {
       final prefs = await SharedPreferences.getInstance();
       final userId = prefs.getInt('userId');
       final activeFamilyGroupId = prefs.getInt('activeFamilyGroupId');
+      final isGroupMode = activeFamilyGroupId != null && activeFamilyGroupId > 0;
+      bool hasGroupReportError = false;
 
-      if (activeFamilyGroupId != null && activeFamilyGroupId > 0) {
+      _activeFamilyGroupId = activeFamilyGroupId;
+
+      if (isGroupMode) {
         try {
           final token = await ApiService.instance.getToken();
           if (token != null && token.isNotEmpty) {
@@ -178,11 +184,14 @@ class _ReportsTabState extends State<ReportsTab> {
           }
         }
       } catch (e) {
-        debugPrint("[ReportsTab] Backend report error (Fallback sang SQLite): $e");
+        debugPrint("[ReportsTab] Backend report error: $e");
+        if (isGroupMode) {
+          hasGroupReportError = true;
+        }
       }
 
-      // Fallback tính toán từ CSDL SQLite cục bộ nếu không kết nối được backend
-      if (!fetchedFromBackend) {
+      // Fallback tính toán từ CSDL SQLite cục bộ ONLY when in Personal Mode!
+      if (!fetchedFromBackend && !isGroupMode) {
         total = 0;
         categories = {};
 
@@ -215,6 +224,13 @@ class _ReportsTabState extends State<ReportsTab> {
       }
 
       if (!mounted || currentReqId != _reportRequestId) return;
+
+      setState(() {
+        _totalAmount = total;
+        _categoryTotals = categories;
+        _hasGroupReportError = hasGroupReportError;
+        _isLoading = false;
+      });
 
       setState(() {
         _totalAmount = total;
@@ -512,12 +528,20 @@ class _ReportsTabState extends State<ReportsTab> {
                 const SizedBox(height: 32),
 
                 if (categories.isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 40),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 40),
                     child: Center(
                       child: Text(
-                        'Chưa có dữ liệu giao dịch trong tháng này',
-                        style: TextStyle(color: AppColors.textSub, fontSize: 14),
+                        _activeFamilyGroupId != null && _activeFamilyGroupId! > 0
+                            ? (_hasGroupReportError
+                                ? 'Chưa tải được báo cáo nhóm gia đình. Vui lòng kiểm tra kết nối mạng!'
+                                : 'Chưa có giao dịch nhóm gia đình trong tháng này')
+                            : 'Chưa có dữ liệu giao dịch trong tháng này',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: _hasGroupReportError ? Colors.orangeAccent : AppColors.textSub,
+                          fontSize: 14,
+                        ),
                       ),
                     ),
                   )
