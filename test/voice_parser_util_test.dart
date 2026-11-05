@@ -110,5 +110,32 @@ void main() {
       expect(result['category'], equals('Đồ ăn'));
       expect(result['note'], equals(input));
     });
+
+    test('13. "ăn sáng 25 nghìn"', () {
+      const input = 'ăn sáng 25 nghìn';
+      final result = VoiceParserUtil.parseVoiceInput(input);
+
+      expect(result['amount'], equals(25000));
+      expect(result['category'], equals('Đồ ăn'));
+      expect(result['note'], equals(input));
+    });
+
+    test('14. "mua đồ 1 triệu rưỡi"', () {
+      const input = 'mua đồ 1 triệu rưỡi';
+      final result = VoiceParserUtil.parseVoiceInput(input);
+
+      expect(result['amount'], equals(1500000));
+      expect(result['category'], equals('Mua sắm'));
+      expect(result['note'], equals(input));
+    });
+
+    test('15. "nhận lương 8 triệu"', () {
+      const input = 'nhận lương 8 triệu';
+      final result = VoiceParserUtil.parseVoiceInput(input);
+
+      expect(result['amount'], equals(8000000));
+      expect(result['category'], equals('Lương'));
+      expect(result['note'], equals(input));
+    });
   });
 }
