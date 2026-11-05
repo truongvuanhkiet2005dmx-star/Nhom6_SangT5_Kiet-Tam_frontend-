@@ -1099,6 +1099,25 @@ class _FamilyWalletModalState extends State<_FamilyWalletModal> {
 
   Future<void> _saveBudget() async {
     if (_activeFamilyGroupId == null || _activeFamilyGroupId! <= 0) return;
+
+    Map<String, dynamic>? activeFamily;
+    for (var f in _families) {
+      if (f is Map) {
+        final id = (f['id'] ?? f['familyGroupId']) as int?;
+        if (id == _activeFamilyGroupId) {
+          activeFamily = Map<String, dynamic>.from(f);
+          break;
+        }
+      }
+    }
+
+    if (activeFamily != null && !_isOwnerOf(activeFamily)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Chỉ chủ nhóm mới có quyền thay đổi hạn mức ngân sách!'), backgroundColor: Colors.orange),
+      );
+      return;
+    }
+
     final budgetVal = int.tryParse(_budgetController.text.replaceAll(',', '').replaceAll('.', '').trim()) ?? 0;
     if (budgetVal <= 0) return;
 

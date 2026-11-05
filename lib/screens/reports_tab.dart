@@ -98,7 +98,32 @@ class _ReportsTabState extends State<ReportsTab> {
       final prefs = await SharedPreferences.getInstance();
       final userId = prefs.getInt('userId');
       final activeFamilyGroupId = prefs.getInt('activeFamilyGroupId');
-      _monthlyBudget = prefs.getInt('monthly_budget') ?? 10000000;
+
+      if (activeFamilyGroupId != null && activeFamilyGroupId > 0) {
+        try {
+          final token = await ApiService.instance.getToken();
+          if (token != null && token.isNotEmpty) {
+            final budgetData = await ApiService.instance.getBudget(
+              activeFamilyGroupId,
+              year: _selectedYear,
+              month: _selectedMonth,
+            );
+            final groupLimit = (budgetData['monthlyLimit'] ?? budgetData['limit'] ?? budgetData['amount'] as num?)?.toInt();
+            if (groupLimit != null && groupLimit > 0) {
+              _monthlyBudget = groupLimit;
+            } else {
+              _monthlyBudget = 0;
+            }
+          } else {
+            _monthlyBudget = 0;
+          }
+        } catch (e) {
+          debugPrint("[ReportsTab] Error fetching group budget: $e");
+          _monthlyBudget = 0;
+        }
+      } else {
+        _monthlyBudget = prefs.getInt('monthly_budget') ?? 10000000;
+      }
 
       if (userId == null) {
         if (mounted && currentReqId == _reportRequestId) {
@@ -460,6 +485,29 @@ class _ReportsTabState extends State<ReportsTab> {
                     ],
                   ),
                 ),
+
+                if (_modeIndex == 0 && _monthlyBudget > 0 && _totalAmount > _monthlyBudget)
+                  Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.red.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.redAccent),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.warning_amber_rounded, color: Colors.redAccent, size: 24),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            '⚠️ Cảnh báo: Đã vượt hạn mức chi tiêu ${_formatMoney(_totalAmount - _monthlyBudget)} đ!',
+                            style: const TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold, fontSize: 13),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
 
                 const SizedBox(height: 32),
 
