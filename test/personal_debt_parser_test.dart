@@ -59,5 +59,26 @@ void main() {
 
       expect(result, isNull);
     });
+
+    test('7. Dedup Key Stability for Identical SMS Content', () {
+      const sample = 'Mình mượn 100k tiền mặt';
+      final res1 = PersonalDebtParser.parse(sample);
+      final res2 = PersonalDebtParser.parse(sample);
+
+      expect(res1, isNotNull);
+      expect(res2, isNotNull);
+      expect(res1!.dedupKey, equals(res2!.dedupKey));
+      expect(res1.isPendingConfirmation, isTrue);
+    });
+
+    test('8. Personal Borrowing SMS: "Mình mượn 100k tiền mặt"', () {
+      const sample = 'Mình mượn 100k tiền mặt';
+      final result = PersonalDebtParser.parse(sample);
+
+      expect(result, isNotNull);
+      expect(result!.amount, equals(100000));
+      expect(result.isExpense, isTrue);
+      expect(result.suggestedCategory, equals('Nợ cá nhân'));
+    });
   });
 }

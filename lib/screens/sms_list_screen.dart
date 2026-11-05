@@ -1,6 +1,11 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../core/app_colors.dart';
+import '../database/database_helper.dart';
+import '../services/auto_transaction_service.dart';
 import '../services/native_listener_bridge.dart';
+import '../services/personal_debt_parser.dart';
 
 class SmsListScreen extends StatefulWidget {
   const SmsListScreen({super.key});
@@ -12,6 +17,9 @@ class SmsListScreen extends StatefulWidget {
 class _SmsListScreenState extends State<SmsListScreen> {
   List<Map<String, String>> _messages = [];
   bool _isLoading = true;
+  final Set<String> _confirmedDedupKeys = {};
+  List<Map<String, dynamic>> _userWallets = [];
+  int? _userId;
 
   final List<Map<String, String>> _sampleBankNotifications = [
     {
@@ -45,6 +53,32 @@ class _SmsListScreenState extends State<SmsListScreen> {
 
   Future<void> _loadSmsMessages() async {
     try {
+      final prefs = await SharedPreferences.getInstance();
+      final userId = prefs.getInt('userId');
+      _userId = userId;
+
+      if (userId != null) {
+        final db = await DatabaseHelper.instance.database;
+        final wallets = await DatabaseHelper.instance.getWallets(userId);
+        _userWallets = wallets;
+
+        // Batch query SQLite for confirmed debt keys
+        final confirmedRows = await db.query(
+          'transactions',
+          columns: ['note'],
+          where: 'userId = ? AND note LIKE ?',
+          whereArgs: [userId, '%DEBT_%'],
+        );
+
+        for (final row in confirmedRows) {
+          final noteStr = row['note']?.toString() ?? '';
+          final keyMatch = RegExp(r'DEBT_\d+').firstMatch(noteStr);
+          if (keyMatch != null) {
+            _confirmedDedupKeys.add(keyMatch.group(0)!);
+          }
+        }
+      }
+
       List<Map<String, String>> messages = await NativeListenerBridge.getInboxSms();
 
       if (!mounted) return;
@@ -54,6 +88,7 @@ class _SmsListScreenState extends State<SmsListScreen> {
         _isLoading = false;
       });
     } catch (e) {
+      debugPrint("[SmsListScreen] Error loading inbox SMS: $e");
       if (!mounted) return;
       setState(() {
         _isLoading = false;
@@ -61,7 +96,6 @@ class _SmsListScreenState extends State<SmsListScreen> {
     }
   }
 
-  // F2 Fix: Hướng dẫn mô phỏng an toàn, tránh tạo giao dịch thật từ mẫu demo
   void _showSampleSyncDialog(String bankName) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -70,6 +104,178 @@ class _SmsListScreenState extends State<SmsListScreen> {
         duration: const Duration(seconds: 4),
       ),
     );
+  }
+
+  Future<void> _showConfirmDebtDialog(ParsedPersonalDebtMessage debt) async {
+    if (_userId == null || _userWallets.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Bạn chưa tạo ví tài khoản. Vui lòng tạo ví trước khi xác nhận!'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    int selectedWalletId = _userWallets.first['id'] as int;
+
+    await showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.card,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return Padding(
+              padding: EdgeInsets.only(
+                left: 20,
+                right: 20,
+                top: 24,
+                bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Xác Nhận Ghi Nhận Nợ Cá Nhân',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.textDark,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: AppColors.surface,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: AppColors.border),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Số tiền: ${_formatMoney(debt.amount)} đ',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: debt.isExpense ? Colors.redAccent : Colors.greenAccent,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          'Đề xuất: ${debt.suggestedCategory} (${debt.isExpense ? "Chi tiêu" : "Thu nhập"})',
+                          style: const TextStyle(color: AppColors.primary, fontSize: 13, fontWeight: FontWeight.w600),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          'Nội dung: ${debt.note}',
+                          style: const TextStyle(color: AppColors.textDark, fontSize: 13),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  const Text(
+                    'Chọn Ví Cần Ghi Nhận:',
+                    style: TextStyle(color: AppColors.textDark, fontWeight: FontWeight.bold, fontSize: 14),
+                  ),
+                  const SizedBox(height: 8),
+                  DropdownButtonFormField<int>(
+                    initialValue: selectedWalletId,
+                    dropdownColor: AppColors.card,
+                    decoration: InputDecoration(
+                      filled: true,
+                      fillColor: AppColors.surface,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(color: AppColors.border),
+                      ),
+                    ),
+                    style: const TextStyle(color: AppColors.textDark, fontWeight: FontWeight.bold),
+                    items: _userWallets.map((w) {
+                      final name = w['name'].toString();
+                      final bal = w['balance'] as int;
+                      return DropdownMenuItem<int>(
+                        value: w['id'] as int,
+                        child: Text('$name (${_formatMoney(bal)} đ)'),
+                      );
+                    }).toList(),
+                    onChanged: (val) {
+                      if (val != null) {
+                        setModalState(() {
+                          selectedWalletId = val;
+                        });
+                      }
+                    },
+                  ),
+                  const SizedBox(height: 24),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextButton(
+                          onPressed: () => Navigator.pop(context),
+                          child: const Text('Bỏ qua', style: TextStyle(color: AppColors.textSub)),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppColors.primary,
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                          onPressed: () async {
+                            Navigator.pop(context);
+                            await AutoTransactionService.instance.confirmPersonalDebtTransaction(
+                              debt,
+                              walletId: selectedWalletId,
+                            );
+                            setState(() {
+                              _confirmedDedupKeys.add(debt.dedupKey);
+                            });
+                            if (!mounted) return;
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Đã xác nhận & lưu giao dịch vào ví thành công!'),
+                                backgroundColor: Colors.green,
+                              ),
+                            );
+                          },
+                          child: const Text(
+                            'Lưu & Xác Nhận',
+                            style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 14),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  String _formatMoney(int amount) {
+    final text = amount.toString();
+    String result = '';
+    for (int i = text.length - 1, count = 1; i >= 0; i--, count++) {
+      result = text[i] + result;
+      if (count % 3 == 0 && i != 0) {
+        result = ',$result';
+      }
+    }
+    return result;
   }
 
   @override
@@ -198,12 +404,14 @@ class _SmsListScreenState extends State<SmsListScreen> {
                 final body = msg['body'] ?? '';
                 final sender = msg['address'] ?? 'Không rõ';
 
-                // F10 Fix: Xiết chặt nhận diện SMS ngân hàng, tránh khớp đơn lẻ chữ đ trong văn bản Tiếng Việt
                 bool isBankSms = body.toLowerCase().contains('vnd') ||
                     body.toLowerCase().contains('vnđ') ||
                     body.toLowerCase().contains('tai khoan') ||
                     body.toLowerCase().contains('so du') ||
                     RegExp(r'\bTK\b', caseSensitive: false).hasMatch(body);
+
+                final parsedDebt = isBankSms ? null : PersonalDebtParser.parse(body);
+                final isConfirmed = parsedDebt != null && _confirmedDedupKeys.contains(parsedDebt.dedupKey);
 
                 return Container(
                   margin: const EdgeInsets.only(bottom: 12),
@@ -212,8 +420,12 @@ class _SmsListScreenState extends State<SmsListScreen> {
                     color: AppColors.card,
                     borderRadius: BorderRadius.circular(16),
                     border: Border.all(
-                      color: isBankSms ? AppColors.primary : AppColors.border,
-                      width: isBankSms ? 1.5 : 1,
+                      color: isBankSms
+                          ? AppColors.primary
+                          : (parsedDebt != null
+                          ? (isConfirmed ? Colors.green : Colors.orange)
+                          : AppColors.border),
+                      width: (isBankSms || parsedDebt != null) ? 1.5 : 1,
                     ),
                   ),
                   child: Column(
@@ -246,6 +458,23 @@ class _SmsListScreenState extends State<SmsListScreen> {
                                   fontWeight: FontWeight.bold,
                                 ),
                               ),
+                            )
+                          else if (parsedDebt != null)
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: isConfirmed ? Colors.green.withValues(alpha: 0.2) : Colors.orange.withValues(alpha: 0.2),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: isConfirmed ? Colors.green : Colors.orange),
+                              ),
+                              child: Text(
+                                isConfirmed ? 'Đã xác nhận' : 'Chờ xác nhận Nợ',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  color: isConfirmed ? Colors.greenAccent : Colors.orangeAccent,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
                             ),
                         ],
                       ),
@@ -254,6 +483,27 @@ class _SmsListScreenState extends State<SmsListScreen> {
                         body,
                         style: const TextStyle(fontSize: 13, color: AppColors.textDark),
                       ),
+                      if (parsedDebt != null && !isConfirmed) ...[
+                        const SizedBox(height: 12),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              'Đề xuất: ${_formatMoney(parsedDebt.amount)} đ (${parsedDebt.suggestedCategory})',
+                              style: const TextStyle(color: Colors.orangeAccent, fontWeight: FontWeight.bold, fontSize: 12),
+                            ),
+                            ElevatedButton.icon(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: AppColors.primary,
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                              ),
+                              onPressed: () => _showConfirmDebtDialog(parsedDebt),
+                              icon: const Icon(Icons.check_circle_outline, color: Colors.black, size: 16),
+                              label: const Text('Xác nhận', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 11)),
+                            ),
+                          ],
+                        ),
+                      ],
                     ],
                   ),
                 );

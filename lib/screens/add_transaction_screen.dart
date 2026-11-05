@@ -1075,7 +1075,16 @@ class _VoiceInputModalState extends State<_VoiceInputModal> {
       }
     } catch (e) {
       debugPrint("[VoiceInputModal] Error matching speech locale: $e");
-      _startListening();
+      if (targetLocale.startsWith('vi')) {
+        if (mounted) {
+          setState(() {
+            _liveText = 'Không thể xác minh gói Tiếng Việt trên thiết bị.';
+          });
+          _showMissingLocaleDialog();
+        }
+      } else {
+        _startListening();
+      }
     }
   }
 
