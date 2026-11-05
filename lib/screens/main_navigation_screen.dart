@@ -162,37 +162,39 @@ class _MainNavigationScreenState
       targetLocale = 'vi_VN';
     }
 
-    String chosenLocaleId = targetLocale;
+    String? chosenLocaleId;
     try {
       final locales = await _speech.locales();
       debugPrint("[MainNavigationScreen] Available speech locales: ${locales.map((l) => l.localeId).join(', ')}");
 
-      String? matchedLocaleId;
       final normalizedTarget = targetLocale.replaceAll('-', '_').toLowerCase();
 
       for (final loc in locales) {
         final id = loc.localeId.replaceAll('-', '_').toLowerCase();
         if (id == normalizedTarget || id == normalizedTarget.split('_')[0]) {
-          matchedLocaleId = loc.localeId;
+          chosenLocaleId = loc.localeId;
           break;
         }
       }
 
-      if (matchedLocaleId == null) {
+      if (chosenLocaleId == null) {
         for (final loc in locales) {
           final id = loc.localeId.replaceAll('-', '_').toLowerCase();
           if (id.startsWith(normalizedTarget.split('_')[0])) {
-            matchedLocaleId = loc.localeId;
+            chosenLocaleId = loc.localeId;
             break;
           }
         }
       }
+    } catch (e) {
+      debugPrint("[MainNavigationScreen] Error matching speech locale: $e");
+    }
 
-      if (matchedLocaleId != null) {
-        chosenLocaleId = matchedLocaleId;
-        debugPrint("[MainNavigationScreen] Selected speech locale: $chosenLocaleId");
-      } else if (targetLocale.startsWith('vi')) {
-        debugPrint("[MainNavigationScreen] No Vietnamese speech locale found in speech engine.");
+    if (chosenLocaleId != null) {
+      debugPrint("[MainNavigationScreen] Selected speech locale: $chosenLocaleId");
+    } else {
+      debugPrint("[MainNavigationScreen] No match for target locale '$targetLocale' in speech engine. Halting speech recognition.");
+      if (targetLocale.startsWith('vi')) {
         if (!mounted) return;
         showDialog(
           context: context,
@@ -216,10 +218,17 @@ class _MainNavigationScreenState
             ],
           ),
         );
-        return;
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Gói ngôn ngữ $lang chưa sẵn sàng trên thiết bị!'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
       }
-    } catch (e) {
-      debugPrint("[MainNavigationScreen] Error matching speech locale: $e");
+      return;
     }
 
     if (!mounted || !_isDialogOpen) return;
