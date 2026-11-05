@@ -9,6 +9,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '../core/constants.dart';
 import '../database/database_helper.dart';
 import 'bank_message_parser.dart';
+import 'personal_debt_parser.dart';
 import 'notification_service.dart';
 import 'sync_service.dart';
 
@@ -258,16 +259,145 @@ class AutoTransactionService {
       });
     }
 
-    final parsed = BankMessageParser.parse(content, packageName: packageName);
-    if (parsed == null) {
-      debugPrint("[AutoTransactionService] Bỏ qua SMS/thông báo không khớp cấu trúc ngân hàng: $content");
-      return false;
+    final parsedBank = BankMessageParser.parse(content, packageName: packageName);
+    if (parsedBank != null) {
+      await _saveParsedTransaction(parsedBank, rawContent: content, packageName: packageName);
+      sw.stop();
+      debugPrint("[Performance] AutoTransactionService.processSmsContent (Bank) completed in ${sw.elapsedMilliseconds}ms");
+      return true;
     }
 
-    await _saveParsedTransaction(parsed, rawContent: content, packageName: packageName);
-    sw.stop();
-    debugPrint("[Performance] AutoTransactionService.processSmsContent completed in ${sw.elapsedMilliseconds}ms");
-    return true;
+    // If not a bank SMS and packageName is empty (incoming Telephony SMS), check for personal debt:
+    if (packageName.isEmpty) {
+      final parsedDebt = PersonalDebtParser.parse(content);
+      if (parsedDebt != null) {
+        await _handlePersonalDebtConfirmation(parsedDebt);
+        sw.stop();
+        debugPrint("[Performance] AutoTransactionService.processSmsContent (Debt) completed in ${sw.elapsedMilliseconds}ms");
+        return true;
+      }
+    }
+
+    debugPrint("[AutoTransactionService] Bỏ qua SMS/thông báo không khớp cấu trúc ngân hàng hoặc nợ cá nhân: $content");
+    return false;
+  }
+
+  Future<void> _handlePersonalDebtConfirmation(ParsedPersonalDebtMessage debt) async {
+    final db = await DatabaseHelper.instance.database;
+    final prefs = await SharedPreferences.getInstance();
+    final userId = prefs.getInt('userId');
+
+    if (userId != null) {
+      final existingTx = await db.query(
+        'transactions',
+        where: 'userId = ? AND note LIKE ?',
+        whereArgs: [userId, '%${debt.dedupKey}%'],
+        limit: 1,
+      );
+
+      if (existingTx.isNotEmpty) {
+        debugPrint("[AutoTransactionService] Bỏ qua SMS nợ cá nhân do đã xác nhận trước đó: ${debt.dedupKey}");
+        return;
+      }
+    }
+
+    // Emit confirmation notification without modifying SQLite balances or auto-inserting
+    try {
+      String typeText = debt.isExpense ? 'Khoản nợ/chi đề xuất' : 'Khoản thu nợ đề xuất';
+      String formattedAmount = _formatMoney(debt.amount);
+      await NotificationService.instance.showNotification(
+        'SmartMoney - $typeText',
+        'SMS: "${debt.note}" ($formattedAmount đ). Mở app để xác nhận ghi nhận ví!',
+      );
+    } catch (e) {
+      debugPrint("Error showing personal debt notification: $e");
+    }
+  }
+
+  Future<void> confirmPersonalDebtTransaction(
+    ParsedPersonalDebtMessage debt, {
+    required int walletId,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    final userId = prefs.getInt('userId');
+    if (userId == null) return;
+
+    final db = await DatabaseHelper.instance.database;
+    final wallet = await DatabaseHelper.instance.getWalletById(walletId);
+    if (wallet == null) return;
+
+    final currentBalance = wallet['balance'] as int;
+    final walletName = wallet['name'] as String;
+    final activeFamilyGroupId = prefs.getInt('activeFamilyGroupId');
+    final generatedEventId = DatabaseHelper.instance.generateUuid();
+
+    final newBalance = debt.isExpense ? (currentBalance - debt.amount) : (currentBalance + debt.amount);
+
+    int insertedTxId = 0;
+    await db.transaction((txn) async {
+      final dupCheck = await txn.query(
+        'transactions',
+        where: 'userId = ? AND note LIKE ?',
+        whereArgs: [userId, '%${debt.dedupKey}%'],
+        limit: 1,
+      );
+
+      if (dupCheck.isNotEmpty) {
+        debugPrint("[AutoTransactionService] Bỏ qua xác nhận vì giao dịch nợ cá nhân đã tồn tại: ${debt.dedupKey}");
+        return;
+      }
+
+      await txn.update(
+        'wallets',
+        {'balance': newBalance},
+        where: 'id = ? AND userId = ?',
+        whereArgs: [walletId, userId],
+      );
+
+      insertedTxId = await txn.insert(
+        'transactions',
+        {
+          'userId': userId,
+          'walletId': walletId,
+          'toWalletId': null,
+          'familyGroupId': activeFamilyGroupId,
+          'amount': debt.amount,
+          'type': debt.isExpense ? 'expense' : 'income',
+          'isExpense': debt.isExpense ? 1 : 0,
+          'categoryName': debt.suggestedCategory,
+          'date': DateTime.now().toIso8601String(),
+          'note': 'Auto [${debt.dedupKey}]: ${debt.note}',
+          'isSynced': 0,
+          'eventId': generatedEventId,
+        },
+      );
+    });
+
+    if (insertedTxId == 0) return;
+
+    onTransactionAdded.add(true);
+
+    unawaited(Future.microtask(() async {
+      try {
+        final txData = {
+          'id': insertedTxId,
+          'eventId': generatedEventId,
+          'userId': userId,
+          'amount': debt.amount,
+          'type': debt.isExpense ? 'expense' : 'income',
+          'walletId': walletId,
+          'walletName': walletName,
+          'bankName': walletName,
+          'packageName': '',
+          'categoryName': debt.suggestedCategory,
+          'date': DateTime.now().toIso8601String(),
+          'note': 'Auto [${debt.dedupKey}]: ${debt.note}',
+        };
+        await SyncService.instance.syncTransaction(txData);
+      } catch (e) {
+        debugPrint("Personal debt background sync error: $e");
+      }
+    }));
   }
 
   Future<void> _saveParsedTransaction(
