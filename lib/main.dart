@@ -17,44 +17,48 @@ void main() {
 
   runApp(const SmartMoneyApp());
 
-  // Non-blocking background initialization after runApp to ensure instant first frame render
-  unawaited(Future.microtask(() async {
-    final swMain = Stopwatch()..start();
+  // Post-frame background initialization after the first Flutter frame is drawn
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    unawaited(_initBackgroundServices());
+  });
+}
 
-    try {
-      await Firebase.initializeApp();
-      FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-        final notification = message.notification;
-        if (notification != null) {
-          NotificationService.instance.showNotification(
-            notification.title ?? 'SmartMoney',
-            notification.body ?? '',
-          );
-        }
-      });
+Future<void> _initBackgroundServices() async {
+  final swMain = Stopwatch()..start();
 
-      FirebaseMessaging.instance.onTokenRefresh.listen((newToken) {
-        ApiService.instance.registerDeviceToken(newToken);
-      });
-    } catch (e) {
-      debugPrint("[main] Firebase/FCM background init warning: $e");
-    }
+  try {
+    await Firebase.initializeApp().timeout(const Duration(seconds: 4));
+    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+      final notification = message.notification;
+      if (notification != null) {
+        NotificationService.instance.showNotification(
+          notification.title ?? 'SmartMoney',
+          notification.body ?? '',
+        );
+      }
+    });
 
-    try {
-      await initializeDateFormatting('vi_VN', null);
-    } catch (e) {
-      debugPrint("Error initializing date formatting: $e");
-    }
+    FirebaseMessaging.instance.onTokenRefresh.listen((newToken) {
+      ApiService.instance.registerDeviceToken(newToken);
+    });
+  } catch (e) {
+    debugPrint("[main] Firebase/FCM post-frame init warning: $e");
+  }
 
-    try {
-      await NotificationService.instance.initialize();
-    } catch (e) {
-      debugPrint("Error initializing NotificationService: $e");
-    }
+  try {
+    await initializeDateFormatting('vi_VN', null);
+  } catch (e) {
+    debugPrint("[main] Error initializing date formatting: $e");
+  }
 
-    swMain.stop();
-    debugPrint("[Performance] Background main() setup completed in ${swMain.elapsedMilliseconds}ms");
-  }));
+  try {
+    await NotificationService.instance.initialize();
+  } catch (e) {
+    debugPrint("[main] Error initializing NotificationService: $e");
+  }
+
+  swMain.stop();
+  debugPrint("[Performance] Post-frame main() setup completed in ${swMain.elapsedMilliseconds}ms");
 }
 
 class SmartMoneyApp extends StatefulWidget {
