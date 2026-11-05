@@ -165,18 +165,34 @@ class _MainNavigationScreenState
     String chosenLocaleId = targetLocale;
     try {
       final locales = await _speech.locales();
-      final hasMatch = locales.any((l) =>
-        l.localeId.replaceAll('-', '_').toLowerCase() == targetLocale.toLowerCase() ||
-        l.localeId.toLowerCase().startsWith(targetLocale.split('_')[0])
-      );
+      debugPrint("[MainNavigationScreen] Available speech locales: ${locales.map((l) => l.localeId).join(', ')}");
 
-      if (hasMatch) {
-        final matched = locales.firstWhere((l) =>
-          l.localeId.replaceAll('-', '_').toLowerCase() == targetLocale.toLowerCase() ||
-          l.localeId.toLowerCase().startsWith(targetLocale.split('_')[0])
-        );
-        chosenLocaleId = matched.localeId;
+      String? matchedLocaleId;
+      final normalizedTarget = targetLocale.replaceAll('-', '_').toLowerCase();
+
+      for (final loc in locales) {
+        final id = loc.localeId.replaceAll('-', '_').toLowerCase();
+        if (id == normalizedTarget || id == normalizedTarget.split('_')[0]) {
+          matchedLocaleId = loc.localeId;
+          break;
+        }
+      }
+
+      if (matchedLocaleId == null) {
+        for (final loc in locales) {
+          final id = loc.localeId.replaceAll('-', '_').toLowerCase();
+          if (id.startsWith(normalizedTarget.split('_')[0])) {
+            matchedLocaleId = loc.localeId;
+            break;
+          }
+        }
+      }
+
+      if (matchedLocaleId != null) {
+        chosenLocaleId = matchedLocaleId;
+        debugPrint("[MainNavigationScreen] Selected speech locale: $chosenLocaleId");
       } else if (targetLocale.startsWith('vi')) {
+        debugPrint("[MainNavigationScreen] No Vietnamese speech locale found in speech engine.");
         if (!mounted) return;
         showDialog(
           context: context,
@@ -185,9 +201,9 @@ class _MainNavigationScreenState
             title: const Text('Cài đặt Google Voice Typing Tiếng Việt', style: TextStyle(color: AppColors.textDark, fontWeight: FontWeight.bold)),
             content: const Text(
               'Gói ngôn ngữ Tiếng Việt chưa sẵn sàng trên ứng dụng Google Voice Typing của thiết bị.\n\n'
-              'Hướng dẫn bật:\n'
+              'Hướng dẫn bật (đường dẫn cài đặt có thể khác nhau tùy hãng máy):\n'
               '1. Vào Cài đặt thiết bị -> Bàn phím & Ngôn ngữ (Language & Input).\n'
-              '2. Chọn Nhập liệu bằng giọng nói của Google (Google Voice Typing).\n'
+              '2. Chọn Nhập liệu bằng giọng nói của Google (Google Voice Typing) hoặc Dịch vụ giọng nói.\n'
               '3. Thêm ngôn ngữ Tiếng Việt (Vietnamese) vào danh sách.\n'
               '4. Khởi động lại tính năng thu âm.',
               style: TextStyle(color: AppColors.textSub, fontSize: 13),
@@ -202,7 +218,9 @@ class _MainNavigationScreenState
         );
         return;
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint("[MainNavigationScreen] Error matching speech locale: $e");
+    }
 
     if (!mounted || !_isDialogOpen) return;
 

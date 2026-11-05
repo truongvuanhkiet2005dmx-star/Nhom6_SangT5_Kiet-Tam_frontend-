@@ -1015,19 +1015,7 @@ class _VoiceInputModalState extends State<_VoiceInputModal> {
         });
 
         if (available) {
-          try {
-            final systemLoc = await _speech.systemLocale();
-            final locales = await _speech.locales();
-            final hasVi = locales.any((l) => l.localeId == 'vi_VN' || l.localeId == 'vi-VN' || l.localeId.startsWith('vi'));
-            if (hasVi) {
-              final viMatch = locales.firstWhere((l) => l.localeId == 'vi_VN' || l.localeId == 'vi-VN' || l.localeId.startsWith('vi'));
-              _selectedLocale = viMatch.localeId;
-            } else if (systemLoc != null) {
-              _selectedLocale = systemLoc.localeId;
-            }
-          } catch (_) {}
-
-          _startListening();
+          await _configureAndStartListening('vi_VN');
         } else {
           setState(() {
             _liveText = 'Không thể khởi tạo dịch vụ nhận diện giọng nói.';
@@ -1042,6 +1030,79 @@ class _VoiceInputModalState extends State<_VoiceInputModal> {
         });
       }
     }
+  }
+
+  Future<void> _configureAndStartListening(String targetLocale) async {
+    if (!_isAvailable) return;
+
+    try {
+      final locales = await _speech.locales();
+      debugPrint("[VoiceInputModal] Available speech locales: ${locales.map((l) => l.localeId).join(', ')}");
+
+      String? matchedLocaleId;
+      final normalizedTarget = targetLocale.replaceAll('-', '_').toLowerCase();
+
+      for (final loc in locales) {
+        final id = loc.localeId.replaceAll('-', '_').toLowerCase();
+        if (id == normalizedTarget || id == normalizedTarget.split('_')[0]) {
+          matchedLocaleId = loc.localeId;
+          break;
+        }
+      }
+
+      if (matchedLocaleId == null) {
+        for (final loc in locales) {
+          final id = loc.localeId.replaceAll('-', '_').toLowerCase();
+          if (id.startsWith(normalizedTarget.split('_')[0])) {
+            matchedLocaleId = loc.localeId;
+            break;
+          }
+        }
+      }
+
+      if (matchedLocaleId != null) {
+        _selectedLocale = matchedLocaleId;
+        debugPrint("[VoiceInputModal] Selected speech locale: $_selectedLocale");
+        _startListening();
+      } else {
+        debugPrint("[VoiceInputModal] No match for target locale '$targetLocale' in speech engine.");
+        if (mounted) {
+          setState(() {
+            _liveText = 'Gói giọng nói Tiếng Việt chưa được cài đặt trên thiết bị.';
+          });
+          _showMissingLocaleDialog();
+        }
+      }
+    } catch (e) {
+      debugPrint("[VoiceInputModal] Error matching speech locale: $e");
+      _startListening();
+    }
+  }
+
+  void _showMissingLocaleDialog() {
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.card,
+        title: const Text('Cài đặt Google Voice Typing Tiếng Việt', style: TextStyle(color: AppColors.textDark, fontWeight: FontWeight.bold)),
+        content: const Text(
+          'Gói ngôn ngữ Tiếng Việt chưa sẵn sàng trên ứng dụng Google Voice Typing của thiết bị.\n\n'
+          'Hướng dẫn bật (đường dẫn cài đặt có thể khác nhau tùy hãng máy):\n'
+          '1. Vào Cài đặt thiết bị -> Bàn phím & Ngôn ngữ (Language & Input).\n'
+          '2. Chọn Nhập liệu bằng giọng nói của Google (Google Voice Typing) hoặc Dịch vụ giọng nói.\n'
+          '3. Thêm ngôn ngữ Tiếng Việt (Vietnamese) vào danh sách.\n'
+          '4. Khởi động lại tính năng thu âm.',
+          style: TextStyle(color: AppColors.textSub, fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Đã hiểu', style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _startListening() async {
@@ -1120,28 +1181,22 @@ class _VoiceInputModalState extends State<_VoiceInputModal> {
                 children: [
                   ChoiceChip(
                     label: const Text('🇻🇳 Tiếng Việt', style: TextStyle(fontSize: 11)),
-                    selected: _selectedLocale == 'vi_VN',
+                    selected: _selectedLocale.startsWith('vi'),
                     selectedColor: AppColors.primary,
                     onSelected: (selected) {
                       if (selected) {
-                        setState(() {
-                          _selectedLocale = 'vi_VN';
-                        });
-                        _startListening();
+                        _configureAndStartListening('vi_VN');
                       }
                     },
                   ),
                   const SizedBox(width: 6),
                   ChoiceChip(
                     label: const Text('🇺🇸 English', style: TextStyle(fontSize: 11)),
-                    selected: _selectedLocale == 'en_US',
+                    selected: _selectedLocale.startsWith('en'),
                     selectedColor: AppColors.primary,
                     onSelected: (selected) {
                       if (selected) {
-                        setState(() {
-                          _selectedLocale = 'en_US';
-                        });
-                        _startListening();
+                        _configureAndStartListening('en_US');
                       }
                     },
                   ),
