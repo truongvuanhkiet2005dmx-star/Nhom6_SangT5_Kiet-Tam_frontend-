@@ -65,82 +65,111 @@ class _SavingsScreenState extends State<SavingsScreen> {
     final nameController = TextEditingController();
     final targetController = TextEditingController();
     final initialController = TextEditingController();
+    bool isSubmitting = false;
 
     try {
       await showDialog(
         context: context,
-        builder: (context) {
-          return AlertDialog(
-            backgroundColor: AppColors.card,
-            scrollable: true,
-            title: const Text('Thêm Hũ / Mục tiêu tiết kiệm', style: TextStyle(color: AppColors.textDark, fontWeight: FontWeight.bold, fontSize: 16)),
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextField(
-                    controller: nameController,
-                    style: const TextStyle(color: AppColors.textDark),
-                    decoration: const InputDecoration(
-                      labelText: 'Tên mục tiêu',
-                      labelStyle: TextStyle(color: AppColors.textSub),
-                      hintText: 'Ví dụ: Mua iPhone 16, Mua Xe máy',
+        builder: (dialogContext) {
+          return StatefulBuilder(
+            builder: (dialogContext, setDialogState) {
+              return AlertDialog(
+                backgroundColor: AppColors.card,
+                scrollable: true,
+                title: const Text('Thêm Hũ / Mục tiêu tiết kiệm', style: TextStyle(color: AppColors.textDark, fontWeight: FontWeight.bold, fontSize: 16)),
+                content: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      controller: nameController,
+                      style: const TextStyle(color: AppColors.textDark),
+                      decoration: const InputDecoration(
+                        labelText: 'Tên mục tiêu',
+                        labelStyle: TextStyle(color: AppColors.textSub),
+                        hintText: 'Ví dụ: Mua iPhone 16, Mua Xe máy',
+                      ),
                     ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: targetController,
+                      keyboardType: TextInputType.number,
+                      style: const TextStyle(color: AppColors.textDark),
+                      decoration: const InputDecoration(
+                        labelText: 'Số tiền mục tiêu',
+                        labelStyle: TextStyle(color: AppColors.textSub),
+                        suffixText: 'VNĐ',
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: initialController,
+                      keyboardType: TextInputType.number,
+                      style: const TextStyle(color: AppColors.textDark),
+                      decoration: const InputDecoration(
+                        labelText: 'Số tiền ban đầu (nếu có)',
+                        labelStyle: TextStyle(color: AppColors.textSub),
+                        suffixText: 'VNĐ',
+                      ),
+                    ),
+                  ],
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: isSubmitting ? null : () => Navigator.pop(dialogContext),
+                    child: const Text('Hủy', style: TextStyle(color: AppColors.textSub)),
                   ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: targetController,
-                    keyboardType: TextInputType.number,
-                    style: const TextStyle(color: AppColors.textDark),
-                    decoration: const InputDecoration(
-                      labelText: 'Số tiền mục tiêu',
-                      labelStyle: TextStyle(color: AppColors.textSub),
-                      suffixText: 'VNĐ',
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: initialController,
-                    keyboardType: TextInputType.number,
-                    style: const TextStyle(color: AppColors.textDark),
-                    decoration: const InputDecoration(
-                      labelText: 'Số tiền ban đầu (nếu có)',
-                      labelStyle: TextStyle(color: AppColors.textSub),
-                      suffixText: 'VNĐ',
-                    ),
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
+                    onPressed: isSubmitting
+                        ? null
+                        : () async {
+                            final name = nameController.text.trim();
+                            final target = int.tryParse(targetController.text.replaceAll(',', '').replaceAll('.', '')) ?? 0;
+                            final initial = int.tryParse(initialController.text.replaceAll(',', '').replaceAll('.', '')) ?? 0;
+
+                            if (name.isEmpty || target <= 0) return;
+
+                            setDialogState(() {
+                              isSubmitting = true;
+                            });
+
+                            try {
+                              await DatabaseHelper.instance.insertSavingsGoal({
+                                'userId': _userId,
+                                'name': name,
+                                'targetAmount': target,
+                                'currentAmount': initial,
+                                'date': DateTime.now().toIso8601String(),
+                              });
+
+                              if (dialogContext.mounted) {
+                                Navigator.pop(dialogContext);
+                              }
+                              if (mounted) {
+                                _loadSavingsGoals();
+                              }
+                            } catch (e) {
+                              debugPrint("[SavingsScreen] Error creating goal: $e");
+                              if (dialogContext.mounted) {
+                                ScaffoldMessenger.of(dialogContext).showSnackBar(
+                                  SnackBar(content: Text('Lỗi tạo hũ: $e'), backgroundColor: Colors.red),
+                                );
+                              }
+                            } finally {
+                              if (dialogContext.mounted) {
+                                setDialogState(() {
+                                  isSubmitting = false;
+                                });
+                              }
+                            }
+                          },
+                    child: isSubmitting
+                        ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.black, strokeWidth: 2))
+                        : const Text('Tạo hũ tiết kiệm', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
                   ),
                 ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Hủy', style: TextStyle(color: AppColors.textSub)),
-              ),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
-                onPressed: () async {
-                  final name = nameController.text.trim();
-                  final target = int.tryParse(targetController.text.replaceAll(',', '').replaceAll('.', '')) ?? 0;
-                  final initial = int.tryParse(initialController.text.replaceAll(',', '').replaceAll('.', '')) ?? 0;
-
-                  if (name.isEmpty || target <= 0) return;
-
-                  await DatabaseHelper.instance.insertSavingsGoal({
-                    'userId': _userId,
-                    'name': name,
-                    'targetAmount': target,
-                    'currentAmount': initial,
-                    'date': DateTime.now().toIso8601String(),
-                  });
-
-                  if (!mounted) return;
-                  Navigator.pop(context);
-                  _loadSavingsGoals();
-                },
-                child: const Text('Tạo hũ tiết kiệm', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
-              ),
-            ],
+              );
+            },
           );
         },
       );
@@ -154,8 +183,9 @@ class _SavingsScreenState extends State<SavingsScreen> {
   Future<void> _depositMoneyDialog(Map<String, dynamic> goal) async {
     if (_userId == null) return;
     final goalId = goal['id'] as int;
-    final currentAmount = goal['currentAmount'] as int;
+    final goalName = goal['name']?.toString() ?? 'Mục tiêu';
     final amountController = TextEditingController();
+    bool isSubmitting = false;
 
     final wallets = await DatabaseHelper.instance.getWallets(_userId!);
     if (wallets.isEmpty) {
@@ -173,98 +203,104 @@ class _SavingsScreenState extends State<SavingsScreen> {
     try {
       await showDialog(
         context: context,
-        builder: (context) {
+        builder: (dialogContext) {
           return StatefulBuilder(
-            builder: (context, setDialogState) {
+            builder: (dialogContext, setDialogState) {
               return AlertDialog(
                 backgroundColor: AppColors.card,
                 scrollable: true,
-                title: Text('Nạp tiền vào: ${goal['name']}', style: const TextStyle(color: AppColors.textDark, fontWeight: FontWeight.bold, fontSize: 16)),
-                content: SingleChildScrollView(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      DropdownButtonFormField<int>(
-                        initialValue: selectedWalletId,
-                        dropdownColor: AppColors.card,
-                        style: const TextStyle(color: AppColors.textDark),
-                        decoration: const InputDecoration(
-                          labelText: 'Chọn ví trừ tiền',
-                          labelStyle: TextStyle(color: AppColors.textSub),
-                        ),
-                        items: wallets.map((w) {
-                          return DropdownMenuItem<int>(
-                            value: w['id'] as int,
-                            child: Text('${w['name']} (${w['balance']} đ)', style: const TextStyle(color: AppColors.textDark)),
-                          );
-                        }).toList(),
-                        onChanged: (val) {
-                          if (val != null) setDialogState(() => selectedWalletId = val);
-                        },
+                title: Text('Nạp tiền vào: $goalName', style: const TextStyle(color: AppColors.textDark, fontWeight: FontWeight.bold, fontSize: 16)),
+                content: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    DropdownButtonFormField<int>(
+                      initialValue: selectedWalletId,
+                      dropdownColor: AppColors.card,
+                      style: const TextStyle(color: AppColors.textDark),
+                      decoration: const InputDecoration(
+                        labelText: 'Chọn ví trừ tiền',
+                        labelStyle: TextStyle(color: AppColors.textSub),
                       ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: amountController,
-                        keyboardType: TextInputType.number,
-                        autofocus: true,
-                        style: const TextStyle(color: AppColors.textDark),
-                        decoration: const InputDecoration(
-                          labelText: 'Số tiền nạp thêm',
-                          labelStyle: TextStyle(color: AppColors.textSub),
-                          suffixText: 'VNĐ',
-                        ),
+                      items: wallets.map((w) {
+                        return DropdownMenuItem<int>(
+                          value: w['id'] as int,
+                          child: Text('${w['name']} (${w['balance']} đ)', style: const TextStyle(color: AppColors.textDark)),
+                        );
+                      }).toList(),
+                      onChanged: isSubmitting
+                          ? null
+                          : (val) {
+                              if (val != null) setDialogState(() => selectedWalletId = val);
+                            },
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: amountController,
+                      keyboardType: TextInputType.number,
+                      autofocus: true,
+                      style: const TextStyle(color: AppColors.textDark),
+                      decoration: const InputDecoration(
+                        labelText: 'Số tiền nạp thêm',
+                        labelStyle: TextStyle(color: AppColors.textSub),
+                        suffixText: 'VNĐ',
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
                 actions: [
                   TextButton(
-                    onPressed: () => Navigator.pop(context),
+                    onPressed: isSubmitting ? null : () => Navigator.pop(dialogContext),
                     child: const Text('Hủy', style: TextStyle(color: AppColors.textSub)),
                   ),
                   ElevatedButton(
                     style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
-                    onPressed: () async {
-                      final addAmt = int.tryParse(amountController.text.replaceAll(',', '').replaceAll('.', '')) ?? 0;
-                      if (addAmt <= 0) return;
+                    onPressed: isSubmitting
+                        ? null
+                        : () async {
+                            final addAmt = int.tryParse(amountController.text.replaceAll(',', '').replaceAll('.', '')) ?? 0;
+                            if (addAmt <= 0) return;
 
-                      // F14 & F4 Fix: Kiểm tra số dư ví trước khi trừ tiền nạp hũ
-                      final wallet = await DatabaseHelper.instance.getWalletById(selectedWalletId);
-                      if (wallet != null) {
-                        final currentWalletBal = (wallet['balance'] as num?)?.toInt() ?? 0;
-                        if (currentWalletBal < addAmt) {
-                          if (!mounted) return;
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Số dư ví không đủ để nạp vào hũ tiết kiệm!'),
-                              backgroundColor: Colors.red,
-                            ),
-                          );
-                          return;
-                        }
+                            setDialogState(() {
+                              isSubmitting = true;
+                            });
 
-                        await DatabaseHelper.instance.updateWalletBalance(selectedWalletId, currentWalletBal - addAmt);
+                            try {
+                              // Execute atomic SQLite transaction
+                              await DatabaseHelper.instance.depositToSavingsGoalTxn(
+                                userId: _userId!,
+                                walletId: selectedWalletId,
+                                goalId: goalId,
+                                depositAmount: addAmt,
+                                goalName: goalName,
+                              );
 
-                        await DatabaseHelper.instance.insertTransaction({
-                          'userId': _userId,
-                          'walletId': selectedWalletId,
-                          'amount': addAmt,
-                          'type': 'expense',
-                          'isExpense': 1,
-                          'categoryName': 'Tiết kiệm',
-                          'date': DateTime.now().toIso8601String(),
-                          'note': 'Nạp vào hũ: ${goal['name']}',
-                        });
-                      }
-
-                      final newAmount = currentAmount + addAmt;
-                      await DatabaseHelper.instance.updateSavingsGoalAmount(goalId, newAmount);
-
-                      if (!mounted) return;
-                      Navigator.pop(context);
-                      _loadSavingsGoals();
-                    },
-                    child: const Text('Nạp tiền', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+                              if (dialogContext.mounted) {
+                                Navigator.pop(dialogContext);
+                              }
+                              if (mounted) {
+                                _loadSavingsGoals();
+                              }
+                            } catch (e) {
+                              final errorStr = e.toString().replaceAll('Exception: ', '').trim();
+                              if (dialogContext.mounted) {
+                                ScaffoldMessenger.of(dialogContext).showSnackBar(
+                                  SnackBar(
+                                    content: Text(errorStr.isNotEmpty ? errorStr : 'Lỗi nạp tiền!'),
+                                    backgroundColor: Colors.red,
+                                  ),
+                                );
+                              }
+                            } finally {
+                              if (dialogContext.mounted) {
+                                setDialogState(() {
+                                  isSubmitting = false;
+                                });
+                              }
+                            }
+                          },
+                    child: isSubmitting
+                        ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.black, strokeWidth: 2))
+                        : const Text('Nạp tiền', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
                   ),
                 ],
               );

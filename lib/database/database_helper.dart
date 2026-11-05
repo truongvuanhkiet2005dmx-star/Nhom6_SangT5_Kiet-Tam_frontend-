@@ -1246,4 +1246,71 @@ class DatabaseHelper {
       if (creatorDisplayName != null) 'creatorDisplayName': creatorDisplayName,
     });
   }
+
+  Future<void> depositToSavingsGoalTxn({
+    required int userId,
+    required int walletId,
+    required int goalId,
+    required int depositAmount,
+    required String goalName,
+  }) async {
+    final db = await instance.database;
+    await db.transaction((txn) async {
+      final walletRows = await txn.query(
+        'wallets',
+        where: 'id = ? AND userId = ?',
+        whereArgs: [walletId, userId],
+        limit: 1,
+      );
+
+      if (walletRows.isEmpty) {
+        throw Exception('Ví trừ tiền không tồn tại');
+      }
+
+      final currentWalletBal = (walletRows.first['balance'] as num?)?.toInt() ?? 0;
+      if (currentWalletBal < depositAmount) {
+        throw Exception('Số dư ví không đủ để nạp vào hũ tiết kiệm!');
+      }
+
+      await txn.update(
+        'wallets',
+        {'balance': currentWalletBal - depositAmount},
+        where: 'id = ? AND userId = ?',
+        whereArgs: [walletId, userId],
+      );
+
+      await txn.insert('transactions', {
+        'userId': userId,
+        'walletId': walletId,
+        'toWalletId': null,
+        'amount': depositAmount,
+        'type': 'expense',
+        'isExpense': 1,
+        'categoryName': 'Tiết kiệm',
+        'date': DateTime.now().toIso8601String(),
+        'note': 'Nạp vào hũ: $goalName',
+        'isSynced': 0,
+        'eventId': generateUuid(),
+      });
+
+      final goalRows = await txn.query(
+        'savings_goals',
+        where: 'id = ? AND userId = ?',
+        whereArgs: [goalId, userId],
+        limit: 1,
+      );
+
+      if (goalRows.isEmpty) {
+        throw Exception('Hũ tiết kiệm không tồn tại');
+      }
+
+      final goalCurAmount = (goalRows.first['currentAmount'] as num?)?.toInt() ?? 0;
+      await txn.update(
+        'savings_goals',
+        {'currentAmount': goalCurAmount + depositAmount},
+        where: 'id = ? AND userId = ?',
+        whereArgs: [goalId, userId],
+      );
+    });
+  }
 }
