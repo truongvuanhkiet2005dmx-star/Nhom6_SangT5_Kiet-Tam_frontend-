@@ -514,7 +514,7 @@ class _AddTransactionScreenState
 
       Navigator.pop(context, true);
 
-      // Async background network sync so UI pops instantly (< 10ms)
+      // Async network sync on main isolate event loop so UI pops without waiting for HTTP response
       unawaited(Future.microtask(() async {
         try {
           final txData = {
@@ -1015,7 +1015,17 @@ class _VoiceInputModalState extends State<_VoiceInputModal> {
         });
 
         if (available) {
-          await _configureAndStartListening('vi_VN');
+          final prefs = await SharedPreferences.getInstance();
+          final lang = prefs.getString('language') ?? 'Tiếng Việt';
+          String targetLocale = 'vi_VN';
+          if (lang == 'English') {
+            targetLocale = 'en_US';
+          } else if (lang == '日本語') {
+            targetLocale = 'ja_JP';
+          } else {
+            targetLocale = 'vi_VN';
+          }
+          await _configureAndStartListening(targetLocale);
         } else {
           setState(() {
             _liveText = 'Không thể khởi tạo dịch vụ nhận diện giọng nói.';
@@ -1034,6 +1044,15 @@ class _VoiceInputModalState extends State<_VoiceInputModal> {
 
   Future<void> _configureAndStartListening(String targetLocale) async {
     if (!_isAvailable) return;
+
+    if (_isListening) {
+      await _speech.stop();
+      if (mounted) {
+        setState(() {
+          _isListening = false;
+        });
+      }
+    }
 
     try {
       final locales = await _speech.locales();
@@ -1068,9 +1087,11 @@ class _VoiceInputModalState extends State<_VoiceInputModal> {
         debugPrint("[VoiceInputModal] No match for target locale '$targetLocale' in speech engine.");
         if (mounted) {
           setState(() {
-            _liveText = 'Gói giọng nói Tiếng Việt chưa được cài đặt trên thiết bị.';
+            _liveText = 'Gói ngôn ngữ chưa được cài đặt trên thiết bị.';
           });
-          _showMissingLocaleDialog();
+          if (targetLocale.startsWith('vi')) {
+            _showMissingLocaleDialog();
+          }
         }
       }
     } catch (e) {
@@ -1082,8 +1103,10 @@ class _VoiceInputModalState extends State<_VoiceInputModal> {
           });
           _showMissingLocaleDialog();
         }
-      } else {
-        _startListening();
+      } else if (mounted) {
+        setState(() {
+          _liveText = 'Không thể xác minh ngôn ngữ nhận dạng giọng nói.';
+        });
       }
     }
   }

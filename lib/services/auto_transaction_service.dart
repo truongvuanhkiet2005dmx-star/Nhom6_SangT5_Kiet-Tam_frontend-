@@ -599,7 +599,7 @@ class AutoTransactionService {
       debugPrint("Notification error in background: $e");
     }
 
-    // Unawaited background network sync so notification listener completes in < 10ms
+    // Unawaited network sync on main isolate event loop so notification listener completes immediately
     unawaited(Future.microtask(() async {
       try {
         await SyncService.instance.syncUnsyncedWallets(walletUserId);
